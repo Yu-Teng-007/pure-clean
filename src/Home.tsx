@@ -13,6 +13,7 @@ import {
   ShieldWarning,
 } from "@phosphor-icons/react";
 import type { AppTool } from "./appView";
+import OptimizeModal from "./OptimizeModal";
 import ProtectPathsModal from "./ProtectPathsModal";
 import {
   AppConfig,
@@ -46,6 +47,21 @@ export default function Home({ onOpenTool }: HomeProps) {
   const [protectInput, setProtectInput] = useState("");
   const [protectOpen, setProtectOpen] = useState(false);
   const [protectLeaving, setProtectLeaving] = useState(false);
+  const [optimizeOpen, setOptimizeOpen] = useState(false);
+  const [optimizeLeaving, setOptimizeLeaving] = useState(false);
+
+  const refreshHomeStats = useCallback(async () => {
+    try {
+      const [d, h] = await Promise.all([
+        invoke<DriveInfo[]>("list_drives"),
+        invoke<HistoryEntry[]>("load_history"),
+      ]);
+      setDrives(d);
+      setHistory(h.slice(0, 3));
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const persistProtected = useCallback(async (next: string[]) => {
     setProtectedPaths(next);
@@ -90,14 +106,28 @@ export default function Home({ onOpenTool }: HomeProps) {
     }, MODAL_OUT_MS);
   }, [protectLeaving]);
 
+  const closeOptimize = useCallback(() => {
+    if (optimizeLeaving) return;
+    if (prefersReducedMotion()) {
+      setOptimizeOpen(false);
+      setOptimizeLeaving(false);
+      return;
+    }
+    setOptimizeLeaving(true);
+    window.setTimeout(() => {
+      setOptimizeOpen(false);
+      setOptimizeLeaving(false);
+    }, MODAL_OUT_MS);
+  }, [optimizeLeaving]);
+
   useEffect(() => {
-    if (!protectOpen) return;
+    if (!protectOpen || optimizeOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeProtect();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [protectOpen, closeProtect]);
+  }, [protectOpen, optimizeOpen, closeProtect]);
 
   const addProtected = async () => {
     const trimmed = protectInput.trim();
@@ -152,8 +182,9 @@ export default function Home({ onOpenTool }: HomeProps) {
           >
             <button
               type="button"
-              onClick={() => onOpenTool("optimize")}
+              onClick={() => setOptimizeOpen(true)}
               className="btn-press home-featured group w-full text-left rounded-2xl p-5 md:p-6"
+              aria-haspopup="dialog"
             >
               <div className="flex items-start gap-4">
                 <span className="home-featured__icon flex size-11 shrink-0 items-center justify-center rounded-2xl">
@@ -391,6 +422,17 @@ export default function Home({ onOpenTool }: HomeProps) {
           void persistProtected(protectedPaths.filter((x) => x !== p))
         }
         onClose={closeProtect}
+      />
+
+      <OptimizeModal
+        open={optimizeOpen}
+        leaving={optimizeLeaving}
+        onClose={closeOptimize}
+        onFinished={() => void refreshHomeStats()}
+        onOpenStartup={() => {
+          closeOptimize();
+          window.setTimeout(() => onOpenTool("startup"), MODAL_OUT_MS);
+        }}
       />
     </div>
   );

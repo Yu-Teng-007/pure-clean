@@ -352,6 +352,15 @@ body {
   animation: modal-out 0.18s var(--ease-out) both;
 }
 
+.optimize-icon-pulse {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+
+.optimize-step--active {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-sea) 22%, transparent);
+  transform: translateY(-1px);
+}
+
 .animate-row-enter {
   animation: row-enter 0.35s var(--ease-out) both;
 }
@@ -666,6 +675,7 @@ body {
   .animate-backdrop-out,
   .animate-modal-in,
   .animate-modal-out,
+  .optimize-icon-pulse,
   .animate-row-enter,
   .animate-row-exit,
   .animate-row-cleaning,
