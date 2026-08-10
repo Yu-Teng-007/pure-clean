@@ -5,10 +5,13 @@ export type Category =
   | "java"
   | "python"
   | "other_dev"
+  | "ide_cache"
+  | "node_modules"
   | "system_temp"
   | "recycle_bin"
   | "browser_cache"
-  | "large_files";
+  | "large_files"
+  | "docker_wsl";
 
 export type Risk = "safe" | "caution" | "dangerous";
 
@@ -54,12 +57,14 @@ export interface CleanReport {
 }
 
 export const DEFAULT_MIN_FILE_BYTES = 500 * 1024 * 1024;
+export const DEFAULT_STALE_DAYS = 30;
 
 export interface AppConfig {
   scanRoots: string[];
   enabledCategories: Category[];
   selectCautionByDefault: boolean;
   minFileBytes: number;
+  staleDays: number;
 }
 
 export function formatBytes(bytes: number): string {
@@ -79,14 +84,23 @@ export const CATEGORY_ORDER: Category[] = [
   "java",
   "python",
   "other_dev",
+  "ide_cache",
+  "node_modules",
   "system_temp",
   "recycle_bin",
   "browser_cache",
   "large_files",
+  "docker_wsl",
 ];
 
 export const MIN_FILE_PRESETS: { label: string; bytes: number }[] = [
   { label: "100 MB", bytes: 100 * 1024 * 1024 },
   { label: "500 MB", bytes: 500 * 1024 * 1024 },
   { label: "1 GB", bytes: 1024 * 1024 * 1024 },
+];
+
+export const STALE_DAY_PRESETS: { label: string; days: number }[] = [
+  { label: "7 天", days: 7 },
+  { label: "30 天", days: 30 },
+  { label: "90 天", days: 90 },
 ];

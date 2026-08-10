@@ -9,10 +9,13 @@ pub enum Category {
     Java,
     Python,
     OtherDev,
+    IdeCache,
+    NodeModules,
     SystemTemp,
     RecycleBin,
     BrowserCache,
     LargeFiles,
+    DockerWsl,
 }
 
 impl Category {
@@ -24,10 +27,13 @@ impl Category {
             Category::Java => "Java (Gradle / Maven)",
             Category::Python => "Python",
             Category::OtherDev => "其他开发缓存",
+            Category::IdeCache => "IDE / 编辑器缓存",
+            Category::NodeModules => "node_modules",
             Category::SystemTemp => "系统临时文件",
             Category::RecycleBin => "回收站",
             Category::BrowserCache => "浏览器缓存",
             Category::LargeFiles => "大文件",
+            Category::DockerWsl => "Docker / WSL",
         }
     }
 
@@ -39,10 +45,13 @@ impl Category {
             Category::Java,
             Category::Python,
             Category::OtherDev,
+            Category::IdeCache,
+            Category::NodeModules,
             Category::SystemTemp,
             Category::RecycleBin,
             Category::BrowserCache,
             Category::LargeFiles,
+            Category::DockerWsl,
         ]
     }
 }
@@ -125,6 +134,11 @@ pub struct ScanRequest {
     /// Minimum size for individual files reported under LargeFiles.
     /// Defaults to 500 MiB when omitted.
     pub min_file_bytes: Option<u64>,
+    /// Only report node_modules directories whose mtime is at least this many days ago.
+    /// Defaults to 30 when omitted and NodeModules is enabled.
+    pub stale_days: Option<u64>,
+    /// When true, drop items that are not Risk::Safe after scanning.
+    pub safe_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

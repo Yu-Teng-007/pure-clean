@@ -6,9 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::model::Category;
 
 pub const DEFAULT_MIN_FILE_BYTES: u64 = 500 * 1024 * 1024;
+pub const DEFAULT_STALE_DAYS: u64 = 30;
 
 fn default_min_file_bytes() -> u64 {
     DEFAULT_MIN_FILE_BYTES
+}
+
+fn default_stale_days() -> u64 {
+    DEFAULT_STALE_DAYS
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +24,8 @@ pub struct AppConfig {
     pub select_caution_by_default: bool,
     #[serde(default = "default_min_file_bytes")]
     pub min_file_bytes: u64,
+    #[serde(default = "default_stale_days")]
+    pub stale_days: u64,
 }
 
 impl Default for AppConfig {
@@ -39,6 +46,7 @@ impl Default for AppConfig {
             enabled_categories: Category::all(),
             select_caution_by_default: false,
             min_file_bytes: DEFAULT_MIN_FILE_BYTES,
+            stale_days: DEFAULT_STALE_DAYS,
         }
     }
 }

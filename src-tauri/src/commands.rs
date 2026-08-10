@@ -58,6 +58,8 @@ pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
         request.categories,
         max_depth,
         request.min_file_bytes,
+        request.stale_days,
+        request.safe_only.unwrap_or(false),
     )
 }
 

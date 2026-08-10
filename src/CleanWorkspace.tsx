@@ -10,8 +10,10 @@ import {
   CleanProgress,
   CleanReport,
   DEFAULT_MIN_FILE_BYTES,
+  DEFAULT_STALE_DAYS,
   formatBytes,
   MIN_FILE_PRESETS,
+  STALE_DAY_PRESETS,
   ScanItem,
   ScanProgress,
   ScanResult,
@@ -89,7 +91,11 @@ function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined 
     (i) =>
       i.path === path ||
       (i.special === "recycle_bin" &&
-        (path === "回收站" || path.includes("回收站"))),
+        (path === "回收站" || path.includes("回收站"))) ||
+      (i.special === "docker_prune" &&
+        (path === "docker_prune" ||
+          path.includes("Docker") ||
+          path.toLowerCase().includes("docker"))),
   );
 }
 
@@ -126,6 +132,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [confirmLeaving, setConfirmLeaving] = useState(false);
   const [selectCaution, setSelectCaution] = useState(false);
   const [minFileBytes, setMinFileBytes] = useState(DEFAULT_MIN_FILE_BYTES);
+  const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -182,6 +189,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         setRoots(cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]);
         setSelectCaution(cfg.selectCautionByDefault);
         setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
+        setStaleDays(cfg.staleDays ?? DEFAULT_STALE_DAYS);
       } catch {
         setRoots(["D:\\YHDJA"]);
       }
@@ -250,6 +258,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
     [persistConfig],
   );
 
+  const updateStaleDays = useCallback(
+    async (days: number) => {
+      setStaleDays(days);
+      await persistConfig({ staleDays: days });
+    },
+    [persistConfig],
+  );
+
   const addRoot = async () => {
     const trimmed = rootInput.trim();
     if (!trimmed) {
@@ -293,6 +309,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           categories: meta.categories,
           maxDepth: 6,
           minFileBytes: meta.needsThreshold ? minFileBytes : undefined,
+          staleDays: meta.needsStaleDays ? staleDays : undefined,
+          safeOnly: meta.safeOnly ? true : undefined,
         },
       });
       setItems(result.items);
@@ -300,6 +318,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
       const next = new Set<string>();
       for (const item of result.items) {
         if (
+          meta.safeOnly ||
           item.selectedByDefault ||
           (selectCaution && item.risk === "caution")
         ) {
@@ -420,6 +439,13 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             if (i.special === "recycle_bin") {
               return !result.failures.some((f) => f.path === "回收站");
             }
+            if (i.special === "docker_prune") {
+              return !result.failures.some(
+                (f) =>
+                  f.path === "Docker system prune" ||
+                  f.path.toLowerCase().includes("docker"),
+              );
+            }
             return !failedPaths.has(i.path);
           })
           .map((i) => i.id);
@@ -438,6 +464,13 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             if (!selectedRef.current.has(i.id)) return true;
             if (i.special === "recycle_bin") {
               return result.failures.some((f) => f.path === "回收站");
+            }
+            if (i.special === "docker_prune") {
+              return result.failures.some(
+                (f) =>
+                  f.path === "Docker system prune" ||
+                  f.path.toLowerCase().includes("docker"),
+              );
             }
             return failedPaths.has(i.path);
           }),
@@ -544,7 +577,12 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 ))}
                 {mode === "dev" && (
                   <span className="text-xs text-[var(--color-ink)]/45 self-center">
-                    全局开发缓存路径会自动包含
+                    {meta.rootsHint ?? "全局开发缓存路径会自动包含"}
+                  </span>
+                )}
+                {mode === "safe" && meta.rootsHint && (
+                  <span className="text-xs text-[var(--color-ink)]/45 self-center">
+                    {meta.rootsHint}
                   </span>
                 )}
               </div>
@@ -554,7 +592,9 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           {!meta.needsRoots && (
             <div className="flex flex-wrap gap-2 items-center justify-between">
               <p className="text-sm text-[var(--color-ink)]/60">
-                将扫描系统临时目录、回收站与浏览器缓存
+                {mode === "docker"
+                  ? "将扫描 Docker / WSL 虚拟磁盘，并可执行 docker system prune"
+                  : "将扫描系统临时目录、回收站、浏览器与系统缓存"}
               </p>
               <button
                 type="button"
@@ -612,6 +652,55 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                   className="w-16 rounded-md border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
                 MB
+              </label>
+            </div>
+          )}
+
+          {meta.needsStaleDays && (
+            <div
+              className={[
+                "flex flex-wrap items-center gap-2",
+                meta.needsRoots || meta.needsThreshold ? "mt-3" : "",
+              ].join(" ")}
+            >
+              <span className="text-xs text-[var(--color-ink)]/55">
+                闲置 node_modules
+              </span>
+              {STALE_DAY_PRESETS.map((preset) => {
+                const active = staleDays === preset.days;
+                return (
+                  <button
+                    key={preset.days}
+                    type="button"
+                    disabled={phase === "scanning" || phase === "cleaning"}
+                    onClick={() => void updateStaleDays(preset.days)}
+                    className={[
+                      "btn-press rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
+                      active
+                        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
+                    ].join(" ")}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
+                自定义
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  value={Math.max(1, staleDays)}
+                  onChange={(e) => {
+                    const days = Number(e.target.value);
+                    if (!Number.isFinite(days) || days < 1) return;
+                    void updateStaleDays(Math.round(days));
+                  }}
+                  className="w-16 rounded-md border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+                />
+                天未修改
               </label>
             </div>
           )}

@@ -345,6 +345,17 @@ pub struct FixedPath {
     pub selected_by_default: bool,
 }
 
+fn push_ide_cache_dirs(paths: &mut Vec<FixedPath>, base: PathBuf) {
+    for name in ["Cache", "CachedData", "Code Cache", "GPUCache", "logs"] {
+        paths.push(FixedPath {
+            path: base.join(name),
+            category: Category::IdeCache,
+            risk: Risk::Caution,
+            selected_by_default: false,
+        });
+    }
+}
+
 pub fn fixed_dev_paths() -> Vec<FixedPath> {
     let mut paths = Vec::new();
 
@@ -363,6 +374,13 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
             risk: Risk::Caution,
             selected_by_default: false,
         });
+        // JetBrains shared caches (Linux-style layout also appears via JetBrains Toolbox)
+        paths.push(FixedPath {
+            path: home.join(".cache").join("JetBrains"),
+            category: Category::IdeCache,
+            risk: Risk::Caution,
+            selected_by_default: false,
+        });
     }
 
     // npm cache
@@ -374,6 +392,11 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
             risk: Risk::Safe,
             selected_by_default: true,
         });
+
+        // VS Code / Cursor / VSCodium editor caches
+        push_ide_cache_dirs(&mut paths, roaming.join("Code"));
+        push_ide_cache_dirs(&mut paths, roaming.join("Cursor"));
+        push_ide_cache_dirs(&mut paths, roaming.join("VSCodium"));
     }
 
     if let Some(local) = dirs::data_local_dir() {
@@ -408,6 +431,27 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
             risk: Risk::Safe,
             selected_by_default: true,
         });
+
+        // JetBrains product caches / logs / tmp under Local AppData
+        let jetbrains = local.join("JetBrains");
+        if jetbrains.is_dir() {
+            if let Ok(products) = std::fs::read_dir(&jetbrains) {
+                for product in products.flatten() {
+                    let product_path = product.path();
+                    if !product_path.is_dir() {
+                        continue;
+                    }
+                    for name in ["caches", "log", "tmp", "Local History"] {
+                        paths.push(FixedPath {
+                            path: product_path.join(name),
+                            category: Category::IdeCache,
+                            risk: Risk::Caution,
+                            selected_by_default: false,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     // Cargo registry/git caches are useful but large — include as caution under Rust
@@ -428,6 +472,42 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
     }
 
     paths
+}
+
+fn push_chromium_profile_caches(paths: &mut Vec<FixedPath>, user_data: PathBuf) {
+    let default = user_data.join("Default");
+    for name in ["Cache", "Code Cache", "GPUCache"] {
+        paths.push(FixedPath {
+            path: default.join(name),
+            category: Category::BrowserCache,
+            risk: Risk::Dangerous,
+            selected_by_default: false,
+        });
+    }
+}
+
+fn push_firefox_profile_caches(paths: &mut Vec<FixedPath>, profiles_root: PathBuf) {
+    let Ok(entries) = std::fs::read_dir(&profiles_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        paths.push(FixedPath {
+            path: path.join("cache2"),
+            category: Category::BrowserCache,
+            risk: Risk::Dangerous,
+            selected_by_default: false,
+        });
+        paths.push(FixedPath {
+            path: path.join("startupCache"),
+            category: Category::BrowserCache,
+            risk: Risk::Dangerous,
+            selected_by_default: false,
+        });
+    }
 }
 
 pub fn fixed_system_paths() -> Vec<FixedPath> {
@@ -461,61 +541,280 @@ pub fn fixed_system_paths() -> Vec<FixedPath> {
             selected_by_default: true,
         });
 
-        // Chrome / Edge caches — not selected by default
-        let chrome_cache = local
-            .join("Google")
-            .join("Chrome")
-            .join("User Data")
-            .join("Default")
-            .join("Cache");
+        // Thumbnail / icon caches (individual db files)
+        let explorer = local.join("Microsoft").join("Windows").join("Explorer");
+        if explorer.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&explorer) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_lowercase();
+                    if (name.starts_with("thumbcache") || name.starts_with("iconcache"))
+                        && name.ends_with(".db")
+                    {
+                        paths.push(FixedPath {
+                            path: entry.path(),
+                            category: Category::SystemTemp,
+                            risk: Risk::Caution,
+                            selected_by_default: false,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Delivery Optimization cache
         paths.push(FixedPath {
-            path: chrome_cache,
-            category: Category::BrowserCache,
+            path: local
+                .join("Microsoft")
+                .join("Windows")
+                .join("DeliveryOptimization")
+                .join("Cache"),
+            category: Category::SystemTemp,
+            risk: Risk::Safe,
+            selected_by_default: true,
+        });
+
+        // Chrome / Edge / Brave
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Google").join("Chrome").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Microsoft").join("Edge").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("BraveSoftware").join("Brave-Browser").join("User Data"),
+        );
+
+        // Firefox
+        push_firefox_profile_caches(&mut paths, local.join("Mozilla").join("Firefox").join("Profiles"));
+    }
+
+    // Prefetch — caution (diagnostics / boot hints)
+    paths.push(FixedPath {
+        path: PathBuf::from(r"C:\Windows\Prefetch"),
+        category: Category::SystemTemp,
+        risk: Risk::Caution,
+        selected_by_default: false,
+    });
+
+    // Windows Update download cache — often needs admin
+    paths.push(FixedPath {
+        path: PathBuf::from(r"C:\Windows\SoftwareDistribution\Download"),
+        category: Category::SystemTemp,
+        risk: Risk::Dangerous,
+        selected_by_default: false,
+    });
+
+    // Previous Windows installation leftover
+    paths.push(FixedPath {
+        path: PathBuf::from(r"C:\Windows.old"),
+        category: Category::SystemTemp,
+        risk: Risk::Dangerous,
+        selected_by_default: false,
+    });
+
+    paths
+}
+
+/// Find stale `node_modules` directories under a project root.
+pub fn scan_node_modules(
+    root: &Path,
+    max_depth: usize,
+    stale_days: u64,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<ScanItem> {
+    use std::time::{Duration, SystemTime};
+
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    if !root.is_dir() {
+        return items;
+    }
+
+    let min_age = Duration::from_secs(stale_days.saturating_mul(24 * 60 * 60));
+    let now = SystemTime::now();
+
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir()
+                && matches!(
+                    name.as_ref(),
+                    ".git" | ".pnpm-store" | "$Recycle.Bin" | "System Volume Information"
+                )
+            {
+                return false;
+            }
+            // Do not descend into node_modules; the node_modules directory itself is still visited.
+            if e.depth() > 1 {
+                if let Some(parent) = e.path().parent() {
+                    if parent
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.eq_ignore_ascii_case("node_modules"))
+                        .unwrap_or(false)
+                    {
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        on_progress(&path.to_string_lossy());
+
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if !name.eq_ignore_ascii_case("node_modules") {
+            continue;
+        }
+        // Prefer project-level node_modules (parent has package.json)
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        if !has_package_json(parent) {
+            continue;
+        }
+        // Skip nested node_modules inside another node_modules
+        if parent
+            .components()
+            .any(|c| c.as_os_str().eq_ignore_ascii_case("node_modules"))
+        {
+            continue;
+        }
+
+        let meta = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let modified = match meta.modified() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let age = match now.duration_since(modified) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if age < min_age {
+            continue;
+        }
+
+        let key = path.to_string_lossy().to_string();
+        if !seen.insert(key) {
+            continue;
+        }
+        items.push(make_item(
+            path.to_path_buf(),
+            Category::NodeModules,
+            Risk::Caution,
+            false,
+        ));
+    }
+
+    items
+}
+
+pub fn fixed_docker_wsl_paths() -> Vec<FixedPath> {
+    let mut paths = Vec::new();
+
+    if let Some(local) = dirs::data_local_dir() {
+        // Docker Desktop WSL virtual disks
+        paths.push(FixedPath {
+            path: local
+                .join("Docker")
+                .join("wsl")
+                .join("data")
+                .join("ext4.vhdx"),
+            category: Category::DockerWsl,
+            risk: Risk::Dangerous,
+            selected_by_default: false,
+        });
+        paths.push(FixedPath {
+            path: local
+                .join("Docker")
+                .join("wsl")
+                .join("distro")
+                .join("ext4.vhdx"),
+            category: Category::DockerWsl,
             risk: Risk::Dangerous,
             selected_by_default: false,
         });
 
-        let edge_cache = local
-            .join("Microsoft")
-            .join("Edge")
-            .join("User Data")
-            .join("Default")
-            .join("Cache");
-        paths.push(FixedPath {
-            path: edge_cache,
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
-
-        let chrome_code = local
-            .join("Google")
-            .join("Chrome")
-            .join("User Data")
-            .join("Default")
-            .join("Code Cache");
-        paths.push(FixedPath {
-            path: chrome_code,
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
-
-        let edge_code = local
-            .join("Microsoft")
-            .join("Edge")
-            .join("User Data")
-            .join("Default")
-            .join("Code Cache");
-        paths.push(FixedPath {
-            path: edge_code,
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
+        // WSL distro packages store vhdx under LocalState
+        let packages = local.join("Packages");
+        if packages.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&packages) {
+                for entry in entries.flatten() {
+                    let local_state = entry.path().join("LocalState");
+                    let vhdx = local_state.join("ext4.vhdx");
+                    if vhdx.is_file() {
+                        paths.push(FixedPath {
+                            path: vhdx,
+                            category: Category::DockerWsl,
+                            risk: Risk::Dangerous,
+                            selected_by_default: false,
+                        });
+                    }
+                }
+            }
+        }
     }
 
     paths
+}
+
+pub fn docker_prune_item() -> ScanItem {
+    // Size unknown until prune; show as actionable special with 0 estimate.
+    make_special_item(
+        "special:docker_prune",
+        "Docker system prune（未使用的镜像 / 容器 / 网络）",
+        Category::DockerWsl,
+        Risk::Dangerous,
+        false,
+        "docker_prune",
+        0,
+    )
+}
+
+/// Prefer file size for vhdx; fall back to dir size for directories.
+pub fn make_file_or_dir_item(
+    path: PathBuf,
+    category: Category,
+    risk: Risk,
+    selected: bool,
+) -> ScanItem {
+    let path_str = path.to_string_lossy().to_string();
+    let bytes = if path.is_file() {
+        std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        dir_size_bytes(&path)
+    };
+    ScanItem {
+        id: item_id(&path_str),
+        category_label: category.label().to_string(),
+        category,
+        path: path_str,
+        bytes,
+        risk,
+        selected_by_default: selected,
+        special: None,
+    }
 }
 
 pub fn scan_fixed_paths(
@@ -543,7 +842,7 @@ pub fn scan_fixed_paths(
         if !seen.insert(canonical) {
             continue;
         }
-        items.push(make_item(
+        items.push(make_file_or_dir_item(
             fp.path.clone(),
             fp.category.clone(),
             fp.risk.clone(),

@@ -6,11 +6,11 @@ use std::path::Path;
 
 use tauri::{AppHandle, Emitter};
 
-use crate::config::DEFAULT_MIN_FILE_BYTES;
-use crate::model::{Category, ScanProgress, ScanResult};
+use crate::config::{DEFAULT_MIN_FILE_BYTES, DEFAULT_STALE_DAYS};
+use crate::model::{Category, Risk, ScanItem, ScanProgress, ScanResult};
 use crate::scan::rules::{
-    fixed_dev_paths, fixed_system_paths, recycle_bin_item, scan_fixed_paths, scan_large_files,
-    scan_project_tree,
+    docker_prune_item, fixed_dev_paths, fixed_docker_wsl_paths, fixed_system_paths,
+    recycle_bin_item, scan_fixed_paths, scan_large_files, scan_node_modules, scan_project_tree,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -24,18 +24,35 @@ fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u
     );
 }
 
+fn push_unique(
+    items: &mut Vec<ScanItem>,
+    items_found: &mut usize,
+    bytes_found: &mut u64,
+    item: ScanItem,
+) {
+    if items.iter().any(|i| i.path == item.path) {
+        return;
+    }
+    *items_found += 1;
+    *bytes_found = bytes_found.saturating_add(item.bytes);
+    items.push(item);
+}
+
 pub fn run_scan(
     app: &AppHandle,
     roots: &[String],
     categories: Option<Vec<Category>>,
     max_depth: usize,
     min_file_bytes: Option<u64>,
+    stale_days: Option<u64>,
+    safe_only: bool,
 ) -> ScanResult {
     let enabled: HashSet<Category> = categories
         .unwrap_or_else(Category::all)
         .into_iter()
         .collect();
     let min_bytes = min_file_bytes.unwrap_or(DEFAULT_MIN_FILE_BYTES);
+    let stale = stale_days.unwrap_or(DEFAULT_STALE_DAYS);
 
     let mut items = Vec::new();
     let mut items_found = 0usize;
@@ -51,9 +68,7 @@ pub fn run_scan(
             emit_progress(app, p, items_found, bytes_found);
         });
         for item in found {
-            items_found += 1;
-            bytes_found = bytes_found.saturating_add(item.bytes);
-            items.push(item);
+            push_unique(&mut items, &mut items_found, &mut bytes_found, item);
         }
 
         if enabled.contains(&Category::LargeFiles) {
@@ -61,36 +76,47 @@ pub fn run_scan(
                 emit_progress(app, p, items_found, bytes_found);
             });
             for item in large {
-                if items.iter().any(|i| i.path == item.path) {
-                    continue;
-                }
-                items_found += 1;
-                bytes_found = bytes_found.saturating_add(item.bytes);
-                items.push(item);
+                push_unique(&mut items, &mut items_found, &mut bytes_found, item);
+            }
+        }
+
+        if enabled.contains(&Category::NodeModules) {
+            let modules = scan_node_modules(path, max_depth, stale, &mut |p| {
+                emit_progress(app, p, items_found, bytes_found);
+            });
+            for item in modules {
+                push_unique(&mut items, &mut items_found, &mut bytes_found, item);
             }
         }
     }
 
     let mut fixed = fixed_dev_paths();
     fixed.extend(fixed_system_paths());
+    fixed.extend(fixed_docker_wsl_paths());
     let fixed_items = scan_fixed_paths(&fixed, &enabled, &mut |p| {
         emit_progress(app, p, items_found, bytes_found);
     });
     for item in fixed_items {
-        if items.iter().any(|i| i.path == item.path) {
-            continue;
-        }
-        items_found += 1;
-        bytes_found = bytes_found.saturating_add(item.bytes);
-        items.push(item);
+        push_unique(&mut items, &mut items_found, &mut bytes_found, item);
     }
 
     if enabled.contains(&Category::RecycleBin) {
         let rb = recycle_bin_item();
-        items_found += 1;
-        bytes_found = bytes_found.saturating_add(rb.bytes);
-        items.push(rb);
+        push_unique(&mut items, &mut items_found, &mut bytes_found, rb);
         emit_progress(app, "回收站", items_found, bytes_found);
+    }
+
+    if enabled.contains(&Category::DockerWsl) {
+        let prune = docker_prune_item();
+        push_unique(&mut items, &mut items_found, &mut bytes_found, prune);
+        emit_progress(app, "Docker prune", items_found, bytes_found);
+    }
+
+    if safe_only {
+        items.retain(|i| i.risk == Risk::Safe);
+        items_found = items.len();
+        bytes_found = items.iter().map(|i| i.bytes).sum();
+        emit_progress(app, "仅保留安全项", items_found, bytes_found);
     }
 
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes));

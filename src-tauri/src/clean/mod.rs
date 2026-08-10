@@ -229,6 +229,37 @@ fn empty_recycle_bin() -> Result<(), String> {
     Err("回收站清理仅支持 Windows".into())
 }
 
+fn run_docker_prune() -> Result<String, String> {
+    use std::process::Command;
+
+    let output = Command::new("docker")
+        .args(["system", "prune", "-af"])
+        .output()
+        .map_err(|e| {
+            format!("无法启动 docker 命令: {e}（请确认已安装 Docker Desktop 且 docker 在 PATH 中）")
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if !output.status.success() {
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("退出码 {}", output.status)
+        };
+        return Err(format!("docker system prune 失败: {detail}"));
+    }
+
+    Ok(if stdout.is_empty() {
+        "Docker prune 完成".into()
+    } else {
+        stdout
+    })
+}
+
 fn format_skip_message(path: &str, outcome: &RemoveOutcome) -> String {
     let hint = outcome
         .last_error
@@ -273,6 +304,16 @@ pub fn run_clean(app: &AppHandle, paths: &[String], specials: &[String]) -> Clea
                 }
                 Err(e) => failures.push(CleanFailure {
                     path: "回收站".into(),
+                    error: e,
+                }),
+            },
+            "docker_prune" => match run_docker_prune() {
+                Ok(msg) => {
+                    success_count += 1;
+                    let _ = msg;
+                }
+                Err(e) => failures.push(CleanFailure {
+                    path: "Docker system prune".into(),
                     error: e,
                 }),
             },
