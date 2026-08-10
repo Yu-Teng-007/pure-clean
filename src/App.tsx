@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -15,6 +15,9 @@ import {
 } from "./types";
 
 type Phase = "idle" | "scanning" | "ready" | "cleaning" | "done";
+
+const EXIT_MS = 380;
+const MODAL_OUT_MS = 180;
 
 function riskLabel(risk: ScanItem["risk"]): string {
   switch (risk) {
@@ -38,6 +41,68 @@ function riskClass(risk: ScanItem["risk"]): string {
   }
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function useAnimatedNumber(target: number, duration = 420): number {
+  const [value, setValue] = useState(target);
+  const valueRef = useRef(target);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setValue(target);
+      return;
+    }
+    const from = valueRef.current;
+    const delta = target - from;
+    if (delta === 0) return;
+
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      const next = Math.round(from + delta * eased);
+      setValue(next);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return value;
+}
+
+function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined {
+  return items.find(
+    (i) =>
+      i.path === path ||
+      (i.special === "recycle_bin" &&
+        (path === "回收站" || path.includes("回收站"))),
+  );
+}
+
+function SuccessCheck() {
+  return (
+    <svg
+      className="success-check animate-check-pop"
+      viewBox="0 0 28 28"
+      aria-hidden
+    >
+      <circle className="success-check__circle" cx="14" cy="14" r="12" />
+      <path className="success-check__mark" d="M8.5 14.2l3.4 3.4 7.6-7.6" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [roots, setRoots] = useState<string[]>([]);
   const [rootInput, setRootInput] = useState("");
@@ -49,7 +114,56 @@ export default function App() {
   const [report, setReport] = useState<CleanReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmLeaving, setConfirmLeaving] = useState(false);
   const [selectCaution, setSelectCaution] = useState(false);
+  const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+  const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
+  const [listEpoch, setListEpoch] = useState(0);
+  const [freedFlash, setFreedFlash] = useState(0);
+
+  const itemsRef = useRef(items);
+  const selectedRef = useRef(selected);
+  const lastCleanedIdRef = useRef<string | null>(null);
+  const exitTimersRef = useRef<number[]>([]);
+  const goneIdsRef = useRef<Set<string>>(new Set());
+  const exitingIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  useEffect(() => {
+    goneIdsRef.current = goneIds;
+  }, [goneIds]);
+  useEffect(() => {
+    exitingIdsRef.current = exitingIds;
+  }, [exitingIds]);
+
+  const clearExitTimers = () => {
+    exitTimersRef.current.forEach((t) => clearTimeout(t));
+    exitTimersRef.current = [];
+  };
+
+  const markExiting = useCallback((id: string) => {
+    if (goneIdsRef.current.has(id) || exitingIdsRef.current.has(id)) return;
+    exitingIdsRef.current = new Set(exitingIdsRef.current).add(id);
+    setExitingIds(new Set(exitingIdsRef.current));
+    const delay = prefersReducedMotion() ? 0 : EXIT_MS;
+    const t = window.setTimeout(() => {
+      exitingIdsRef.current = new Set(exitingIdsRef.current);
+      exitingIdsRef.current.delete(id);
+      goneIdsRef.current = new Set(goneIdsRef.current).add(id);
+      setGoneIds(new Set(goneIdsRef.current));
+      setExitingIds(new Set(exitingIdsRef.current));
+    }, delay);
+    exitTimersRef.current.push(t);
+  }, []);
+
+  const animatedFreed = useAnimatedNumber(cleanProgress?.freedBytes ?? 0);
+  const animatedReportFreed = useAnimatedNumber(report?.freedBytes ?? 0, 700);
 
   useEffect(() => {
     (async () => {
@@ -70,12 +184,30 @@ export default function App() {
         setScanProgress(e.payload);
       });
       const u2 = await listen<CleanProgress>("clean_progress", (e) => {
-        setCleanProgress(e.payload);
+        const progress = e.payload;
+        setCleanProgress(progress);
+
+        const match = matchItemByPath(itemsRef.current, progress.currentPath);
+        if (match) {
+          if (
+            lastCleanedIdRef.current &&
+            lastCleanedIdRef.current !== match.id
+          ) {
+            markExiting(lastCleanedIdRef.current);
+          }
+          lastCleanedIdRef.current = match.id;
+          setActiveCleanId(match.id);
+        }
+
+        setFreedFlash((n) => n + 1);
       });
       unsubs = [u1, u2];
     })();
-    return () => unsubs.forEach((u) => u());
-  }, []);
+    return () => {
+      unsubs.forEach((u) => u());
+      clearExitTimers();
+    };
+  }, [markExiting]);
 
   const persistRoots = useCallback(async (next: string[]) => {
     setRoots(next);
@@ -111,6 +243,13 @@ export default function App() {
   const startScan = async () => {
     setError(null);
     setReport(null);
+    clearExitTimers();
+    setExitingIds(new Set());
+    setGoneIds(new Set());
+    exitingIdsRef.current = new Set();
+    goneIdsRef.current = new Set();
+    setActiveCleanId(null);
+    lastCleanedIdRef.current = null;
     setPhase("scanning");
     setScanProgress({ currentPath: "准备扫描…", itemsFound: 0, bytesFound: 0 });
     try {
@@ -122,6 +261,7 @@ export default function App() {
         },
       });
       setItems(result.items);
+      setListEpoch((n) => n + 1);
       const next = new Set<string>();
       for (const item of result.items) {
         if (
@@ -151,8 +291,12 @@ export default function App() {
   }, [items]);
 
   const selectedItems = useMemo(
-    () => items.filter((i) => selected.has(i.id)),
-    [items, selected],
+    () =>
+      items.filter(
+        (i) =>
+          selected.has(i.id) && !exitingIds.has(i.id) && !goneIds.has(i.id),
+      ),
+    [items, selected, exitingIds, goneIds],
   );
 
   const selectedBytes = useMemo(
@@ -161,6 +305,7 @@ export default function App() {
   );
 
   const toggleItem = (id: string) => {
+    if (phase === "cleaning") return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -170,6 +315,7 @@ export default function App() {
   };
 
   const toggleCategory = (catItems: ScanItem[], on: boolean) => {
+    if (phase === "cleaning") return;
     setSelected((prev) => {
       const next = new Set(prev);
       for (const item of catItems) {
@@ -186,44 +332,109 @@ export default function App() {
     setSelected(new Set(items.filter((i) => i.risk === "safe").map((i) => i.id)));
   };
 
-  const runClean = async () => {
-    setConfirmOpen(false);
-    setPhase("cleaning");
-    setCleanProgress({
-      currentPath: "开始清理…",
-      done: 0,
-      total: selectedItems.length,
-      freedBytes: 0,
-    });
-    try {
-      const paths = selectedItems
-        .filter((i) => !i.special)
-        .map((i) => i.path);
-      const specials = selectedItems
-        .filter((i) => i.special)
-        .map((i) => i.special as string);
-      const result = await invoke<CleanReport>("clean", {
-        request: { paths, specials },
-      });
-      setReport(result);
-      setPhase("done");
-      // Remove successfully cleaned items from list
-      const failedPaths = new Set(result.failures.map((f) => f.path));
-      setItems((prev) =>
-        prev.filter((i) => {
-          if (!selected.has(i.id)) return true;
-          if (i.special === "recycle_bin") {
-            return result.failures.some((f) => f.path === "回收站");
-          }
-          return failedPaths.has(i.path);
-        }),
-      );
-      setSelected(new Set());
-    } catch (e) {
-      setError(String(e));
-      setPhase("ready");
+  const closeConfirm = (after?: () => void) => {
+    if (confirmLeaving) return;
+    if (prefersReducedMotion()) {
+      setConfirmOpen(false);
+      setConfirmLeaving(false);
+      after?.();
+      return;
     }
+    setConfirmLeaving(true);
+    window.setTimeout(() => {
+      setConfirmOpen(false);
+      setConfirmLeaving(false);
+      after?.();
+    }, MODAL_OUT_MS);
   };
+
+  const runClean = async () => {
+    closeConfirm(async () => {
+      setPhase("cleaning");
+      setReport(null);
+      clearExitTimers();
+      setExitingIds(new Set());
+      setGoneIds(new Set());
+      exitingIdsRef.current = new Set();
+      goneIdsRef.current = new Set();
+      setActiveCleanId(null);
+      lastCleanedIdRef.current = null;
+      const selectedNow = itemsRef.current.filter((i) =>
+        selectedRef.current.has(i.id),
+      );
+      setCleanProgress({
+        currentPath: "开始清理…",
+        done: 0,
+        total: selectedNow.length,
+        freedBytes: 0,
+      });
+      try {
+        const paths = selectedNow
+          .filter((i) => !i.special)
+          .map((i) => i.path);
+        const specials = selectedNow
+          .filter((i) => i.special)
+          .map((i) => i.special as string);
+        const result = await invoke<CleanReport>("clean", {
+          request: { paths, specials },
+        });
+
+        const failedPaths = new Set(result.failures.map((f) => f.path));
+        const successIds = selectedNow
+          .filter((i) => {
+            if (i.special === "recycle_bin") {
+              return !result.failures.some((f) => f.path === "回收站");
+            }
+            return !failedPaths.has(i.path);
+          })
+          .map((i) => i.id);
+
+        setActiveCleanId(null);
+        const pendingExit = successIds.filter(
+          (id) => !goneIdsRef.current.has(id),
+        );
+        for (const id of pendingExit) markExiting(id);
+        if (pendingExit.length && !prefersReducedMotion()) {
+          await new Promise((r) => setTimeout(r, EXIT_MS));
+        }
+
+        setItems((prev) =>
+          prev.filter((i) => {
+            if (!selectedRef.current.has(i.id)) return true;
+            if (i.special === "recycle_bin") {
+              return result.failures.some((f) => f.path === "回收站");
+            }
+            return failedPaths.has(i.path);
+          }),
+        );
+        clearExitTimers();
+        setExitingIds(new Set());
+        setGoneIds(new Set());
+        exitingIdsRef.current = new Set();
+        goneIdsRef.current = new Set();
+        setSelected(new Set());
+        lastCleanedIdRef.current = null;
+        setReport(result);
+        setPhase("done");
+      } catch (e) {
+        setError(String(e));
+        setPhase("ready");
+        setActiveCleanId(null);
+        clearExitTimers();
+        setExitingIds(new Set());
+        setGoneIds(new Set());
+        exitingIdsRef.current = new Set();
+        goneIdsRef.current = new Set();
+      }
+    });
+  };
+
+  const cleanPct =
+    cleanProgress && cleanProgress.total
+      ? Math.min(100, (cleanProgress.done / cleanProgress.total) * 100)
+      : 0;
+
+  let rowIndex = 0;
 
   return (
     <div className="min-h-full flex flex-col">
@@ -239,7 +450,10 @@ export default function App() {
         </p>
       </header>
 
-      <section className="px-8 pb-4 animate-fade-up" style={{ animationDelay: "60ms" }}>
+      <section
+        className="px-8 pb-4 animate-fade-up"
+        style={{ animationDelay: "60ms" }}
+      >
         <div className="rounded-2xl border border-[var(--color-sand)]/80 bg-white/55 backdrop-blur-sm px-5 py-4">
           <div className="flex flex-wrap gap-2 items-center">
             <input
@@ -247,20 +461,22 @@ export default function App() {
               onChange={(e) => setRootInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && addRoot()}
               placeholder="添加扫描根目录，如 D:\YHDJA"
-              className="flex-1 min-w-[220px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)]"
+              className="flex-1 min-w-[220px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] transition-[border-color] duration-150"
             />
             <button
               type="button"
               onClick={addRoot}
-              className="rounded-lg border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)] transition"
+              className="btn-press rounded-lg border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)]"
             >
               添加 / 浏览
             </button>
             <button
               type="button"
               onClick={startScan}
-              disabled={phase === "scanning" || phase === "cleaning" || roots.length === 0}
-              className="rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50 transition"
+              disabled={
+                phase === "scanning" || phase === "cleaning" || roots.length === 0
+              }
+              className="btn-press rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
             >
               {phase === "scanning" ? "扫描中…" : "开始扫描"}
             </button>
@@ -275,7 +491,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => removeRoot(r)}
-                  className="text-[var(--color-ink)]/45 hover:text-[var(--color-danger)]"
+                  className="btn-press text-[var(--color-ink)]/45 hover:text-[var(--color-danger)]"
                   aria-label={`移除 ${r}`}
                 >
                   ×
@@ -287,12 +503,16 @@ export default function App() {
             </span>
           </div>
           {phase === "scanning" && scanProgress && (
-            <p className="mt-3 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
-              {scanProgress.currentPath}
-              <span className="ml-2">
-                · 已发现 {scanProgress.itemsFound} 项 / {formatBytes(scanProgress.bytesFound)}
-              </span>
-            </p>
+            <div className="mt-3">
+              <div className="scan-rail" aria-hidden />
+              <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
+                {scanProgress.currentPath}
+                <span className="ml-2">
+                  · 已发现 {scanProgress.itemsFound} 项 /{" "}
+                  {formatBytes(scanProgress.bytesFound)}
+                </span>
+              </p>
+            </div>
           )}
           {error && (
             <p className="mt-3 text-sm text-[var(--color-danger)]">{error}</p>
@@ -300,7 +520,10 @@ export default function App() {
         </div>
       </section>
 
-      <main className="flex-1 px-8 pb-28 overflow-auto animate-fade-up" style={{ animationDelay: "120ms" }}>
+      <main
+        className="flex-1 px-8 pb-28 overflow-auto animate-fade-up"
+        style={{ animationDelay: "120ms" }}
+      >
         {phase === "idle" && items.length === 0 && (
           <div className="h-48 flex items-center justify-center text-[var(--color-ink)]/40 text-sm">
             添加扫描根目录后点击「开始扫描」
@@ -308,93 +531,176 @@ export default function App() {
         )}
 
         {phase === "done" && report && (
-          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/30 bg-[var(--color-sea)]/8 px-5 py-4">
-            <p className="text-lg font-semibold text-[var(--color-sea)]">
-              预计释放 {formatBytes(report.freedBytes)}
-            </p>
-            <p className="text-sm text-[var(--color-ink)]/65 mt-1">
-              成功 {report.successCount} 项
-              {report.failures.length > 0 && ` · 失败 ${report.failures.length} 项`}
-            </p>
-            {report.failures.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {report.failures.map((f) => (
-                  <li key={f.path} className="text-xs font-mono text-[var(--color-danger)]">
-                    {f.path}: {f.error}
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/30 bg-[var(--color-sea)]/8 px-5 py-4 animate-fade-up animate-success-glow">
+            <div className="flex items-start gap-3">
+              <SuccessCheck />
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-semibold text-[var(--color-sea)] tabular-nums">
+                  预计释放 {formatBytes(animatedReportFreed)}
+                </p>
+                <p className="text-sm text-[var(--color-ink)]/65 mt-1">
+                  成功 {report.successCount} 项
+                  {report.failures.length > 0 &&
+                    ` · 失败 ${report.failures.length} 项`}
+                </p>
+                {report.failures.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {report.failures.map((f) => (
+                      <li
+                        key={f.path}
+                        className="text-xs font-mono text-[var(--color-danger)]"
+                      >
+                        {f.path}: {f.error}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {phase === "cleaning" && cleanProgress && (
-          <div className="mb-4">
-            <div className="h-1.5 rounded-full bg-[var(--color-sand)] overflow-hidden">
-              <div
-                className="h-full bg-[var(--color-sea-bright)] transition-all duration-300"
-                style={{
-                  width: `${cleanProgress.total ? (cleanProgress.done / cleanProgress.total) * 100 : 0}%`,
-                }}
-              />
+          <div className="mb-5 rounded-2xl border border-[var(--color-sea)]/20 bg-white/50 backdrop-blur-sm px-5 py-4 animate-fade-up">
+            <div className="flex items-center gap-4">
+              <div className="clean-orb" aria-hidden>
+                <div className="clean-orb__ring" />
+                <div className="clean-orb__core" />
+                <div className="clean-orb__dot" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-3 mb-2">
+                  <p className="text-sm font-semibold text-[var(--color-ink)]">
+                    正在清理
+                  </p>
+                  <p
+                    key={freedFlash}
+                    className="text-sm font-mono tabular-nums text-[var(--color-sea)] animate-freed-flash"
+                  >
+                    已释放 {formatBytes(animatedFreed)}
+                  </p>
+                </div>
+                <div className="progress-track h-1.5">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${cleanPct}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate">
+                  <span className="animate-pulse-soft">
+                    {cleanProgress.currentPath}
+                  </span>
+                  <span className="ml-2 tabular-nums text-[var(--color-ink)]/40">
+                    {cleanProgress.done}/{cleanProgress.total}
+                  </span>
+                </p>
+              </div>
             </div>
-            <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
-              {cleanProgress.currentPath} · {cleanProgress.done}/{cleanProgress.total}
-            </p>
           </div>
         )}
 
         <div className="space-y-5">
           {grouped.map(([category, catItems]) => {
-            const label = catItems[0]?.categoryLabel ?? category;
-            const catBytes = catItems.reduce((s, i) => s + i.bytes, 0);
-            const allOn = catItems.every((i) => selected.has(i.id));
+            const visibleItems = catItems.filter((i) => !goneIds.has(i.id));
+            if (visibleItems.length === 0) return null;
+            const label = visibleItems[0]?.categoryLabel ?? category;
+            const catBytes = visibleItems.reduce((s, i) => s + i.bytes, 0);
+            const selectable = visibleItems.filter((i) => !exitingIds.has(i.id));
+            const allOn =
+              selectable.length > 0 &&
+              selectable.every((i) => selected.has(i.id));
             return (
               <section key={category}>
                 <div className="flex items-baseline justify-between mb-2 px-1">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-sm font-semibold tracking-wide">{label}</h2>
+                    <h2 className="text-sm font-semibold tracking-wide">
+                      {label}
+                    </h2>
                     <button
                       type="button"
                       onClick={() => toggleCategory(catItems, !allOn)}
-                      className="text-xs text-[var(--color-sea)] hover:underline"
+                      disabled={phase === "cleaning"}
+                      className="text-xs text-[var(--color-sea)] hover:underline disabled:opacity-40"
                     >
                       {allOn ? "取消全选" : "全选"}
                     </button>
                   </div>
                   <span className="text-xs font-mono text-[var(--color-ink)]/50">
-                    {formatBytes(catBytes)} · {catItems.length} 项
+                    {formatBytes(catBytes)} · {visibleItems.length} 项
                   </span>
                 </div>
                 <ul className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 divide-y divide-[var(--color-sand)]/50 overflow-hidden">
-                  {catItems.map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex items-start gap-3 px-4 py-3 hover:bg-white/60 transition"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selected.has(item.id)}
-                        onChange={() => toggleItem(item.id)}
-                        className="mt-1 accent-[var(--color-sea)]"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-mono truncate" title={item.path}>
-                            {item.path}
-                          </span>
-                          <span
-                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${riskClass(item.risk)}`}
-                          >
-                            {riskLabel(item.risk)}
-                          </span>
+                  {visibleItems.map((item) => {
+                    const idx = rowIndex++;
+                    const isExiting = exitingIds.has(item.id);
+                    const isCleaning =
+                      phase === "cleaning" && activeCleanId === item.id;
+                    const isSelected = selected.has(item.id);
+                    return (
+                      <li
+                        key={`${listEpoch}-${item.id}`}
+                        className={[
+                          "flex items-start gap-3 px-4 py-3 transition-[background-color] duration-150",
+                          isExiting
+                            ? "animate-row-exit"
+                            : "animate-row-enter hover:bg-white/60",
+                          isCleaning ? "animate-row-cleaning" : "",
+                          phase === "cleaning" && isSelected && !isCleaning
+                            ? "opacity-70"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        style={
+                          isExiting
+                            ? undefined
+                            : {
+                                animationDelay: `${Math.min(idx, 24) * 28}ms`,
+                              }
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleItem(item.id)}
+                          disabled={phase === "cleaning" || isExiting}
+                          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={[
+                                "text-sm font-mono truncate transition-colors duration-200",
+                                isCleaning
+                                  ? "text-[var(--color-sea)]"
+                                  : isExiting
+                                    ? "line-through text-[var(--color-ink)]/35"
+                                    : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              title={item.path}
+                            >
+                              {item.path}
+                            </span>
+                            <span
+                              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${riskClass(item.risk)}`}
+                            >
+                              {riskLabel(item.risk)}
+                            </span>
+                            {isCleaning && (
+                              <span className="text-[10px] font-medium text-[var(--color-sea-bright)] animate-pulse-soft">
+                                清理中
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <span className="text-sm font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/70">
-                        {formatBytes(item.bytes)}
-                      </span>
-                    </li>
-                  ))}
+                        <span className="text-sm font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/70">
+                          {formatBytes(item.bytes)}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             );
@@ -402,58 +708,106 @@ export default function App() {
         </div>
       </main>
 
-      {(phase === "ready" || phase === "done" || phase === "cleaning") && items.length > 0 && (
-        <footer className="fixed bottom-0 inset-x-0 border-t border-[var(--color-sand)] bg-[var(--color-foam)]/90 backdrop-blur-md px-8 py-4">
-          <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
-            <div>
-              <p className="text-sm font-medium">
-                已选 {selectedItems.length} 项 ·{" "}
-                <span className="font-mono text-[var(--color-sea)]">
-                  {formatBytes(selectedBytes)}
-                </span>
-              </p>
-              <div className="mt-1 flex gap-3 text-xs">
-                <button type="button" onClick={selectAllSafe} className="text-[var(--color-sea)] hover:underline">
-                  仅选安全项
-                </button>
-                <button type="button" onClick={clearSelection} className="text-[var(--color-ink)]/50 hover:underline">
-                  清空选择
-                </button>
+      {(phase === "cleaning" ||
+        ((phase === "ready" || phase === "done") &&
+          items.some((i) => !goneIds.has(i.id)))) && (
+          <footer className="fixed bottom-0 inset-x-0 border-t border-[var(--color-sand)] bg-[var(--color-foam)]/90 backdrop-blur-md px-8 py-4 animate-footer-rise">
+            <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
+              <div>
+                {phase === "cleaning" && cleanProgress ? (
+                  <>
+                    <p className="text-sm font-medium tabular-nums">
+                      清理进度 {cleanProgress.done}/{cleanProgress.total}
+                      <span className="ml-2 font-mono text-[var(--color-sea)]">
+                        {formatBytes(animatedFreed)}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--color-ink)]/45">
+                      请稍候，正在安全删除所选项目
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm font-medium">
+                      已选 {selectedItems.length} 项 ·{" "}
+                      <span className="font-mono text-[var(--color-sea)]">
+                        {formatBytes(selectedBytes)}
+                      </span>
+                    </p>
+                    <div className="mt-1 flex gap-3 text-xs">
+                      <button
+                        type="button"
+                        onClick={selectAllSafe}
+                        className="text-[var(--color-sea)] hover:underline"
+                      >
+                        仅选安全项
+                      </button>
+                      <button
+                        type="button"
+                        onClick={clearSelection}
+                        className="text-[var(--color-ink)]/50 hover:underline"
+                      >
+                        清空选择
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
+              <button
+                type="button"
+                disabled={selectedItems.length === 0 || phase === "cleaning"}
+                onClick={() => {
+                  setConfirmLeaving(false);
+                  setConfirmOpen(true);
+                }}
+                className="btn-press rounded-lg bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
+              >
+                {phase === "cleaning" ? "清理中…" : "清理所选"}
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={selectedItems.length === 0 || phase === "cleaning"}
-              onClick={() => setConfirmOpen(true)}
-              className="rounded-lg bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 transition"
-            >
-              清理所选
-            </button>
-          </div>
-        </footer>
-      )}
+          </footer>
+        )}
 
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-ink)]/40 backdrop-blur-[2px] px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fade-up">
-            <h3 className="text-lg font-semibold">确认清理？</h3>
+        <div
+          className={[
+            "fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-ink)]/40 backdrop-blur-[2px] px-4",
+            confirmLeaving ? "animate-backdrop-out" : "animate-backdrop-in",
+          ].join(" ")}
+          onClick={() => closeConfirm()}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-title"
+            className={[
+              "w-full max-w-md rounded-2xl bg-white p-6 shadow-xl",
+              confirmLeaving ? "animate-modal-out" : "animate-modal-in",
+            ].join(" ")}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="confirm-title" className="text-lg font-semibold">
+              确认清理？
+            </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
               将删除 <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-              <strong className="font-mono">{formatBytes(selectedBytes)}</strong>
+              <strong className="font-mono">
+                {formatBytes(selectedBytes)}
+              </strong>
               。缓存类目录通常可安全重建；高风险项请确认无程序占用。
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmOpen(false)}
-                className="rounded-lg px-4 py-2 text-sm border border-[var(--color-sand)] hover:bg-[var(--color-mist)]"
+                onClick={() => closeConfirm()}
+                className="btn-press rounded-lg px-4 py-2 text-sm border border-[var(--color-sand)] hover:bg-[var(--color-mist)]"
               >
                 取消
               </button>
               <button
                 type="button"
-                onClick={runClean}
-                className="rounded-lg px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
+                onClick={() => void runClean()}
+                className="btn-press rounded-lg px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
                 确认删除
               </button>
