@@ -4,6 +4,7 @@ mod config;
 mod drives;
 mod hardware;
 mod history;
+mod memory;
 mod model;
 mod scan;
 mod startup;
@@ -27,6 +28,10 @@ pub fn run() {
             commands::set_startup_enabled,
             commands::run_smart_optimize,
             commands::get_hardware_info,
+            commands::get_memory_snapshot,
+            commands::list_memory_processes,
+            commands::clean_memory,
+            commands::trim_process_working_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pure Clean");

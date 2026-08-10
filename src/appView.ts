@@ -1,4 +1,4 @@
-export type AppTool = "startup" | "cleanHub" | "hardware";
+export type AppTool = "startup" | "cleanHub" | "hardware" | "memory";
 
 export type CleanBack = "home" | "hub";
 

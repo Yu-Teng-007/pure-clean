@@ -5,6 +5,7 @@ use crate::config::{self, AppConfig};
 use crate::drives;
 use crate::hardware::{self, HardwareInfo};
 use crate::history;
+use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
     Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry, OptimizePhase,
     OptimizeProgress, OptimizeReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
@@ -184,6 +185,26 @@ pub fn list_startup_items() -> Vec<StartupItem> {
 #[tauri::command]
 pub fn get_hardware_info() -> HardwareInfo {
     hardware::collect()
+}
+
+#[tauri::command]
+pub fn get_memory_snapshot() -> MemorySnapshot {
+    memory::snapshot()
+}
+
+#[tauri::command]
+pub fn list_memory_processes(limit: Option<usize>) -> Vec<ProcessMemoryItem> {
+    memory::list_processes(limit)
+}
+
+#[tauri::command]
+pub fn clean_memory() -> MemoryCleanReport {
+    memory::clean_memory()
+}
+
+#[tauri::command]
+pub fn trim_process_working_set(pid: u32) -> Result<u64, String> {
+    memory::trim_process(pid)
 }
 
 #[tauri::command]

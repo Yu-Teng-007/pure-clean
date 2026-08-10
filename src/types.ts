@@ -98,6 +98,32 @@ export interface MemoryInfo {
   usedBytes: number;
 }
 
+export interface MemorySnapshot {
+  totalBytes: number;
+  availableBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+}
+
+export interface ProcessMemoryItem {
+  pid: number;
+  name: string;
+  path: string | null;
+  workingSetBytes: number;
+  privateBytes: number;
+  iconDataUrl?: string | null;
+}
+
+export interface MemoryCleanReport {
+  before: MemorySnapshot;
+  after: MemorySnapshot;
+  freedBytes: number;
+  trimmedCount: number;
+  failedCount: number;
+  systemCommandsOk: boolean;
+  message: string;
+}
+
 export interface BoardInfo {
   manufacturer: string;
   product: string;

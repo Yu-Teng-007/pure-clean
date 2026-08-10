@@ -8,7 +8,7 @@ use winreg::RegKey;
 
 use crate::config;
 
-mod icon;
+pub(crate) mod icon;
 
 const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const DISABLED_EXT: &str = ".pcoff";

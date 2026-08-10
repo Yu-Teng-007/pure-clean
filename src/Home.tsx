@@ -9,6 +9,7 @@ import {
   HardDrive,
   HardDrives,
   Lightning,
+  Memory,
   RocketLaunch,
   ShieldWarning,
 } from "@phosphor-icons/react";
@@ -271,6 +272,33 @@ export default function Home({ onOpenTool }: HomeProps) {
                 </button>
               </li>
               <li style={{ animationDelay: "166ms" }}>
+                <button
+                  type="button"
+                  onClick={() => onOpenTool("memory")}
+                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
+                >
+                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
+                    <Memory size={17} weight="duotone" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
+                        内存清理
+                      </span>
+                      <ArrowRight
+                        size={13}
+                        weight="bold"
+                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
+                      查看占用、一键压缩工作集并释放可用内存
+                    </span>
+                  </span>
+                </button>
+              </li>
+              <li style={{ animationDelay: "194ms" }}>
                 <button
                   type="button"
                   onClick={() => onOpenTool("hardware")}
