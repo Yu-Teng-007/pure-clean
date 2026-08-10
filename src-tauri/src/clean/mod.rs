@@ -25,14 +25,36 @@ fn clear_readonly(path: &Path) {
 }
 
 fn classify_io_error(err: &io::Error) -> String {
-    // Windows: 5 = access denied, 32 = sharing violation
+    // Windows: 5 = access denied, 32 = sharing violation, 33 = lock violation,
+    // 145 = directory not empty (often leftover after locked children were skipped)
     match err.raw_os_error() {
         Some(5) => format!("拒绝访问: {err}（可能需要管理员权限，或文件被占用）"),
-        Some(32) => format!("文件被占用: {err}（请关闭相关程序后重试）"),
+        Some(32) | Some(33) => format!("文件被占用: {err}（请关闭相关程序后重试）"),
+        Some(145) => {
+            "目录不是空的（部分子项被占用或无权限，已尽量删除可删内容；关闭占用进程后可再试）"
+                .into()
+        }
         _ if err.kind() == io::ErrorKind::PermissionDenied => {
             format!("拒绝访问: {err}（可能需要管理员权限，或文件被占用）")
         }
+        _ if err.kind() == io::ErrorKind::DirectoryNotEmpty => {
+            "目录不是空的（部分子项被占用或无权限，已尽量删除可删内容；关闭占用进程后可再试）"
+                .into()
+        }
         _ => format!("{err}"),
+    }
+}
+
+/// Prefer actionable root-cause messages over consequential "dir not empty".
+fn remember_error(slot: &mut Option<String>, next: String) {
+    let next_is_consequence = next.contains("目录不是空的");
+    match slot {
+        Some(prev) if prev.contains("目录不是空的") && !next_is_consequence => {
+            *slot = Some(next);
+        }
+        Some(_) if next_is_consequence => {}
+        None => *slot = Some(next),
+        Some(_) => *slot = Some(next),
     }
 }
 
@@ -88,13 +110,25 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
     let mut last_error: Option<String> = None;
 
     // Collect paths deepest-first so we remove files before their parents.
-    let mut entries: Vec<PathBuf> = WalkDir::new(path)
+    // Do not silently drop WalkDir I/O errors — those are often the real skip cause.
+    let mut entries: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(path)
         .follow_links(false)
         .contents_first(true)
         .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.into_path())
-        .collect();
+    {
+        match entry {
+            Ok(e) => entries.push(e.into_path()),
+            Err(e) => {
+                skipped += 1;
+                let msg = e
+                    .io_error()
+                    .map(classify_io_error)
+                    .unwrap_or_else(|| format!("遍历失败: {e}"));
+                remember_error(&mut last_error, msg);
+            }
+        }
+    }
 
     // Ensure root itself is last (contents_first usually puts it last already).
     entries.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
@@ -103,21 +137,29 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
         match remove_one(&entry) {
             Ok(n) => freed_bytes = freed_bytes.saturating_add(n),
             Err(e) => {
-                skipped += 1;
-                last_error = Some(e);
+                // Parent "not empty" after skipped children is expected — still count the skip,
+                // but keep the child root-cause in last_error when present.
+                let consequence = e.contains("目录不是空的");
+                if !(consequence && skipped > 0) {
+                    skipped += 1;
+                }
+                remember_error(&mut last_error, e);
             }
         }
     }
 
-    // If root remains empty, try once more.
+    // If root remains and looks empty enough, try once more (race / delayed unlock).
     if path.exists() {
-        if let Err(e) = remove_one(path) {
-            // Still there — count as skip only if we didn't already.
-            if skipped == 0 {
-                skipped = 1;
-                last_error = Some(e);
-            } else if last_error.is_none() {
-                last_error = Some(e);
+        match remove_one(path) {
+            Ok(_) => {}
+            Err(e) => {
+                let consequence = e.contains("目录不是空的");
+                if skipped == 0 {
+                    skipped = 1;
+                    remember_error(&mut last_error, e);
+                } else if !consequence {
+                    remember_error(&mut last_error, e);
+                }
             }
         }
     }
