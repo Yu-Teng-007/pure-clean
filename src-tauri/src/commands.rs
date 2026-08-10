@@ -3,6 +3,7 @@ use tauri::{AppHandle, Emitter};
 use crate::clean;
 use crate::config::{self, AppConfig};
 use crate::drives;
+use crate::hardware::{self, HardwareInfo};
 use crate::history;
 use crate::model::{
     Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry, OptimizePhase,
@@ -178,6 +179,11 @@ pub fn load_history() -> Vec<HistoryEntry> {
 #[tauri::command]
 pub fn list_startup_items() -> Vec<StartupItem> {
     startup::list_startup_items()
+}
+
+#[tauri::command]
+pub fn get_hardware_info() -> HardwareInfo {
+    hardware::collect()
 }
 
 #[tauri::command]

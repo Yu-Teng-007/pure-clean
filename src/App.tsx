@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AppTool, AppView, CleanBack } from "./appView";
 import CleanToolsHub from "./CleanToolsHub";
 import CleanWorkspace from "./CleanWorkspace";
+import HardwareWorkspace from "./HardwareWorkspace";
 import Home from "./Home";
 import OptimizeWorkspace from "./OptimizeWorkspace";
 import StartupWorkspace from "./StartupWorkspace";
@@ -37,6 +38,8 @@ export default function App() {
           />
         ) : view?.kind === "tool" && view.tool === "startup" ? (
           <StartupWorkspace onBack={goHome} />
+        ) : view?.kind === "tool" && view.tool === "hardware" ? (
+          <HardwareWorkspace onBack={goHome} />
         ) : view?.kind === "tool" && view.tool === "optimize" ? (
           <OptimizeWorkspace
             onBack={goHome}

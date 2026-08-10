@@ -77,6 +77,73 @@ export interface DriveInfo {
   freeBytes: number;
 }
 
+export interface OsInfo {
+  productName: string;
+  displayVersion: string;
+  build: string;
+  hostname: string;
+  architecture: string;
+}
+
+export interface CpuInfo {
+  name: string;
+  physicalCores: number;
+  logicalCores: number;
+  maxClockMhz: number | null;
+}
+
+export interface MemoryInfo {
+  totalBytes: number;
+  availableBytes: number;
+  usedBytes: number;
+}
+
+export interface BoardInfo {
+  manufacturer: string;
+  product: string;
+  biosVersion: string;
+}
+
+export interface GpuInfo {
+  name: string;
+}
+
+export interface DisplayInfo {
+  name: string;
+  isPrimary: boolean;
+  width: number;
+  height: number;
+  refreshHz: number | null;
+}
+
+export interface NetworkAdapterInfo {
+  name: string;
+  description: string;
+  adapterType: string;
+  mac: string;
+  ipv4: string[];
+  operational: boolean;
+}
+
+export interface BatteryInfo {
+  present: boolean;
+  onAc: boolean;
+  charging: boolean;
+  percent: number | null;
+}
+
+export interface HardwareInfo {
+  os: OsInfo;
+  cpu: CpuInfo;
+  memory: MemoryInfo;
+  board: BoardInfo;
+  gpus: GpuInfo[];
+  drives: DriveInfo[];
+  displays: DisplayInfo[];
+  networks: NetworkAdapterInfo[];
+  battery: BatteryInfo;
+}
+
 export interface HistoryEntry {
   id: string;
   timestamp: string;
