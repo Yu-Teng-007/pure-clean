@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
   ClockCountdown,
+  HardDrive,
   HardDrives,
   Code,
   CopySimple,
@@ -42,6 +43,11 @@ const MODE_ICONS: Record<CleanMode, Icon> = {
 
 const SECONDARY_MODES = MODE_ORDER.filter((id) => id !== "safe");
 const MODAL_OUT_MS = 180;
+
+function driveLetter(name: string): string {
+  const m = name.trim().match(/^([A-Za-z]):/);
+  return m ? m[1].toUpperCase() : name.slice(0, 1).toUpperCase() || "?";
+}
 
 function prefersReducedMotion(): boolean {
   return (
@@ -261,11 +267,22 @@ export default function Home({ onEnter }: HomeProps) {
                   const tight = pct >= 90;
                   return (
                     <li key={drive.name}>
-                      <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                        <span className="text-[13px] font-semibold font-mono tracking-tight">
-                          {drive.name}
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="inline-flex min-w-0 items-center gap-2">
+                          <span
+                            className="home-drive-icon relative flex size-7 shrink-0 items-center justify-center rounded-lg"
+                            aria-hidden
+                          >
+                            <HardDrive size={16} weight="duotone" />
+                            <span className="home-drive-letter absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-[4px] font-mono text-[8px] font-bold leading-none">
+                              {driveLetter(drive.name)}
+                            </span>
+                          </span>
+                          <span className="truncate text-[13px] font-semibold font-mono tracking-tight">
+                            {drive.name}
+                          </span>
                         </span>
-                        <span className="text-[11px] font-mono text-[var(--color-ink)]/50">
+                        <span className="shrink-0 text-[11px] font-mono text-[var(--color-ink)]/50">
                           可用 {formatBytes(drive.freeBytes)}
                         </span>
                       </div>

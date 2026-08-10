@@ -400,6 +400,18 @@ body {
   background: color-mix(in srgb, white 50%, transparent);
 }
 
+.home-drive-icon {
+  color: var(--color-sea);
+  background: color-mix(in srgb, var(--color-sea) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--color-sea) 14%, transparent);
+}
+
+.home-drive-letter {
+  color: white;
+  background: var(--color-sea);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, white 80%, transparent);
+}
+
 .home-disk-track {
   position: relative;
   height: 6px;
