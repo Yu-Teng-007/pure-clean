@@ -116,7 +116,7 @@ export default function Home({ onEnter }: HomeProps) {
   const SafeIcon = MODE_ICONS.safe;
 
   return (
-    <div className="home-shell min-h-full flex flex-col overflow-y-auto">
+    <div className="home-shell h-full flex flex-col overflow-y-auto">
       <header className="home-header px-7 pt-6 pb-4 animate-fade-up">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

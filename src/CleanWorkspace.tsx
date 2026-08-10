@@ -698,7 +698,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   };
 
   return (
-    <div className="ws-shell min-h-full flex flex-col">
+    <div className="ws-shell h-full flex flex-col overflow-hidden">
       <header className="ws-header px-7 pt-5 pb-4 animate-fade-up">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex items-start gap-3">
@@ -930,11 +930,11 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
 
       <main
         className={[
-          "flex-1 px-7 overflow-auto animate-fade-up",
+          "flex-1 min-h-0 px-7 overflow-auto",
           showFooter ? "pb-28" : "pb-7",
         ].join(" ")}
-        style={{ animationDelay: "90ms" }}
       >
+        <div className="animate-fade-up" style={{ animationDelay: "90ms" }}>
         {phase === "idle" && items.length === 0 && (
           <div className="ws-empty flex flex-col items-center justify-center rounded-2xl px-6 py-14 text-center">
             <span className="ws-mode-icon mb-3 flex size-12 items-center justify-center rounded-2xl opacity-80">
@@ -1109,6 +1109,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               </section>
             );
           })}
+        </div>
         </div>
       </main>
 
