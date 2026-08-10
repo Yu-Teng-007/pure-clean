@@ -23,6 +23,8 @@ npm run tauri:build
 ## 清理入口
 
 - **一键安全清理**：仅保留「安全」风险项并默认全选
+- **智能优化**：一键安全清理 + 按启发式建议禁用非必要开机项，并生成报告
+- **开机项管理**：列出并启用/禁用 `HKCU`/`HKLM` Run 与 Startup 文件夹中的启动项
 - **开发清理**：构建产物、包管理器 / 语言工具缓存、IDE 缓存、闲置 `node_modules`
 - **系统清理**：临时目录、回收站、浏览器缓存、缩略图、Delivery Optimization、Prefetch、Windows Update、Windows.old
 - **大文件清理**：扫描根内 ≥ 阈值（默认 500 MB）的单个文件
@@ -31,7 +33,7 @@ npm run tauri:build
 - **安装包 / 镜像**：`*.msi` / setup 类 `*.exe` / `*.iso` 与 Android SDK 残留
 - **Docker / WSL**：虚拟磁盘（vhdx）与 `docker system prune`
 
-默认项目根：`D:\YHDJA`（若存在）。配置保存在 `%APPDATA%\pure-clean\config.json`，清理历史在 `history.json`。
+默认项目根：`D:\YHDJA`（若存在）。配置保存在 `%APPDATA%\pure-clean\config.json`，清理历史在 `history.json`，禁用的注册表开机项备份在 `startup-disabled.json`。
 
 ## 体验与安全
 

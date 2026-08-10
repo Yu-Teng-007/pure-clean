@@ -6,8 +6,11 @@ import {
   ClockCountdown,
   HardDrive,
   HardDrives,
+  Lightning,
+  RocketLaunch,
   ShieldWarning,
 } from "@phosphor-icons/react";
+import type { AppTool } from "./appView";
 import { MODE_ORDER, MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
@@ -19,7 +22,8 @@ import {
 } from "./types";
 
 interface HomeProps {
-  onEnter: (mode: CleanMode) => void;
+  onEnterMode: (mode: CleanMode) => void;
+  onOpenTool: (tool: AppTool) => void;
 }
 
 const SECONDARY_MODES = MODE_ORDER.filter((id) => id !== "safe");
@@ -37,7 +41,7 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export default function Home({ onEnter }: HomeProps) {
+export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
@@ -153,7 +157,7 @@ export default function Home({ onEnter }: HomeProps) {
           >
             <button
               type="button"
-              onClick={() => onEnter("safe")}
+              onClick={() => onEnterMode("safe")}
               className="btn-press home-featured group w-full text-left rounded-2xl p-5 md:p-6"
             >
               <div className="flex items-start gap-4">
@@ -180,6 +184,72 @@ export default function Home({ onEnter }: HomeProps) {
             </button>
           </section>
 
+          <section
+            className="animate-fade-up"
+            style={{ animationDelay: "70ms" }}
+            aria-label="系统工具"
+          >
+            <h2 className="mb-2.5 text-[12px] font-semibold tracking-wide text-[var(--color-ink)]/45 uppercase">
+              系统工具
+            </h2>
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <li>
+                <button
+                  type="button"
+                  onClick={() => onOpenTool("optimize")}
+                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
+                >
+                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
+                    <Lightning size={17} weight="duotone" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
+                        智能优化
+                      </span>
+                      <ArrowRight
+                        size={13}
+                        weight="bold"
+                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
+                      一键安全清理并建议禁用非必要开机项
+                    </span>
+                  </span>
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  onClick={() => onOpenTool("startup")}
+                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
+                >
+                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
+                    <RocketLaunch size={17} weight="duotone" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
+                        开机项管理
+                      </span>
+                      <ArrowRight
+                        size={13}
+                        weight="bold"
+                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
+                      查看并启用/禁用注册表与 Startup 启动项
+                    </span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </section>
+
           <nav
             className="animate-fade-up min-h-0"
             style={{ animationDelay: "90ms" }}
@@ -196,7 +266,7 @@ export default function Home({ onEnter }: HomeProps) {
                   >
                     <button
                       type="button"
-                      onClick={() => onEnter(id)}
+                      onClick={() => onEnterMode(id)}
                       className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
                     >
                       <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">

@@ -2669,6 +2669,7 @@ version = "0.1.0"
 dependencies = [
  "dirs",
  "hex",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "sha2",
@@ -2678,6 +2679,7 @@ dependencies = [
  "tauri-plugin-opener",
  "walkdir",
  "windows-sys 0.59.0",
+ "winreg",
 ]
 
 [[package]]

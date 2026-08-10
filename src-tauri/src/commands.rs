@@ -1,14 +1,15 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::clean;
 use crate::config::{self, AppConfig};
 use crate::drives;
 use crate::history;
 use crate::model::{
-    Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry, ScanRequest,
-    ScanResult, ScanRoot,
+    Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry, OptimizePhase,
+    OptimizeProgress, OptimizeReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
 };
 use crate::scan;
+use crate::startup::{self, StartupItem};
 
 #[tauri::command]
 pub fn get_default_roots() -> Vec<ScanRoot> {
@@ -172,4 +173,134 @@ pub fn list_drives() -> Vec<DriveInfo> {
 #[tauri::command]
 pub fn load_history() -> Vec<HistoryEntry> {
     history::load_history()
+}
+
+#[tauri::command]
+pub fn list_startup_items() -> Vec<StartupItem> {
+    startup::list_startup_items()
+}
+
+#[tauri::command]
+pub fn set_startup_enabled(id: String, enabled: bool) -> Result<StartupItem, String> {
+    startup::set_startup_enabled(&id, enabled)
+}
+
+fn emit_optimize(app: &AppHandle, phase: OptimizePhase, message: &str) {
+    let _ = app.emit(
+        "optimize_progress",
+        OptimizeProgress {
+            phase,
+            message: message.to_string(),
+        },
+    );
+}
+
+#[tauri::command]
+pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
+    let cfg = config::load_config();
+    let protected = cfg.protected_paths.clone();
+    let to_recycle = cfg.to_recycle_bin_by_default;
+
+    let mut roots = cfg.scan_roots.clone();
+    if roots.is_empty() {
+        roots = get_default_roots()
+            .into_iter()
+            .filter(|r| r.kind == "project")
+            .map(|r| r.path)
+            .collect();
+    }
+
+    emit_optimize(&app, OptimizePhase::Scanning, "正在扫描可安全清理的项目…");
+
+    let safe_categories = vec![
+        Category::RustTauri,
+        Category::NodeBuild,
+        Category::PackageManagerCache,
+        Category::Java,
+        Category::Python,
+        Category::OtherDev,
+        Category::SystemTemp,
+        Category::RecycleBin,
+    ];
+
+    let scan_result = scan::run_scan(
+        &app,
+        &roots,
+        Some(safe_categories),
+        6,
+        None,
+        None,
+        true,
+        &protected,
+    );
+
+    let targets: Vec<CleanTarget> = scan_result
+        .items
+        .into_iter()
+        .filter(|i| i.selected_by_default)
+        .map(|i| CleanTarget {
+            path: i.path,
+            category: Some(i.category),
+            bytes: Some(i.bytes),
+            special: i.special,
+        })
+        .collect();
+
+    emit_optimize(
+        &app,
+        OptimizePhase::Cleaning,
+        &format!("正在清理 {} 项安全垃圾…", targets.len()),
+    );
+
+    let clean_report = if targets.is_empty() {
+        CleanReport {
+            freed_bytes: 0,
+            success_count: 0,
+            failures: Vec::new(),
+            by_category: Vec::new(),
+            dry_run: false,
+            to_recycle_bin: to_recycle,
+        }
+    } else {
+        clean::run_clean(&app, &targets, false, to_recycle, &protected)
+    };
+
+    let _ = history::append_history(HistoryEntry {
+        id: format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        ),
+        timestamp: chrono_like_now(),
+        mode: Some("optimize".into()),
+        freed_bytes: clean_report.freed_bytes,
+        success_count: clean_report.success_count,
+        failure_count: clean_report.failures.len(),
+        dry_run: clean_report.dry_run,
+        to_recycle_bin: clean_report.to_recycle_bin,
+        by_category: clean_report.by_category.clone(),
+    });
+
+    emit_optimize(&app, OptimizePhase::Startup, "正在优化开机启动项…");
+    let (startups_disabled, startups_skipped, failed_pairs) = startup::disable_suggested();
+    let startups_failed: Vec<StartupFailure> = failed_pairs
+        .into_iter()
+        .map(|(name, error)| StartupFailure { name, error })
+        .collect();
+
+    emit_optimize(&app, OptimizePhase::Done, "体检优化完成");
+
+    OptimizeReport {
+        freed_bytes: clean_report.freed_bytes,
+        clean_success: clean_report.success_count,
+        clean_failures: clean_report.failures,
+        by_category: clean_report.by_category,
+        startups_disabled,
+        startups_skipped,
+        startups_failed,
+        dry_run: clean_report.dry_run,
+        to_recycle_bin: clean_report.to_recycle_bin,
+    }
 }

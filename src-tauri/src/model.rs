@@ -208,3 +208,40 @@ pub struct HistoryEntry {
     pub to_recycle_bin: bool,
     pub by_category: Vec<CategoryFreed>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OptimizePhase {
+    Scanning,
+    Cleaning,
+    Startup,
+    Done,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeProgress {
+    pub phase: OptimizePhase,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupFailure {
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OptimizeReport {
+    pub freed_bytes: u64,
+    pub clean_success: usize,
+    pub clean_failures: Vec<CleanFailure>,
+    pub by_category: Vec<CategoryFreed>,
+    pub startups_disabled: Vec<crate::startup::StartupItem>,
+    pub startups_skipped: Vec<crate::startup::StartupItem>,
+    pub startups_failed: Vec<StartupFailure>,
+    pub dry_run: bool,
+    pub to_recycle_bin: bool,
+}

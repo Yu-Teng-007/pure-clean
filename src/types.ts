@@ -89,6 +89,50 @@ export interface HistoryEntry {
   byCategory: CategoryFreed[];
 }
 
+export type StartupLocation =
+  | "registry_hkcu"
+  | "registry_hklm"
+  | "folder_user"
+  | "folder_common";
+
+export type StartupImpact = "low" | "medium" | "high";
+
+export interface StartupItem {
+  id: string;
+  name: string;
+  command: string;
+  location: StartupLocation;
+  enabled: boolean;
+  publisherHint: string | null;
+  impact: StartupImpact;
+  suggestDisable: boolean;
+  iconDataUrl?: string | null;
+}
+
+export type OptimizePhase = "scanning" | "cleaning" | "startup" | "done";
+
+export interface OptimizeProgress {
+  phase: OptimizePhase;
+  message: string;
+}
+
+export interface StartupFailure {
+  name: string;
+  error: string;
+}
+
+export interface OptimizeReport {
+  freedBytes: number;
+  cleanSuccess: number;
+  cleanFailures: CleanFailure[];
+  byCategory: CategoryFreed[];
+  startupsDisabled: StartupItem[];
+  startupsSkipped: StartupItem[];
+  startupsFailed: StartupFailure[];
+  dryRun: boolean;
+  toRecycleBin: boolean;
+}
+
 export const DEFAULT_MIN_FILE_BYTES = 500 * 1024 * 1024;
 export const DEFAULT_STALE_DAYS = 30;
 export const DEFAULT_DUPE_MIN_BYTES = 10 * 1024 * 1024;

@@ -5,6 +5,7 @@ mod drives;
 mod history;
 mod model;
 mod scan;
+mod startup;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,6 +22,9 @@ pub fn run() {
             commands::format_bytes,
             commands::list_drives,
             commands::load_history,
+            commands::list_startup_items,
+            commands::set_startup_enabled,
+            commands::run_smart_optimize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pure Clean");
