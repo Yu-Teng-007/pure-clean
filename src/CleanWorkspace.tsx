@@ -162,8 +162,6 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
   const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
   const [protectInput, setProtectInput] = useState("");
-  const [toRecycleBin, setToRecycleBin] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -221,7 +219,6 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         setSelectCaution(cfg.selectCautionByDefault);
         setStaleDays(cfg.staleDays ?? DEFAULT_STALE_DAYS);
         setProtectedPaths(cfg.protectedPaths ?? []);
-        setToRecycleBin(cfg.toRecycleBinByDefault ?? false);
         if (meta.needsThreshold) {
           setMinFileBytes(defaultThresholdBytes(mode));
         } else {
@@ -484,7 +481,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         selectedRef.current.has(i.id),
       );
       setCleanProgress({
-        currentPath: dryRun ? "模拟清理…" : "开始清理…",
+        currentPath: "开始清理…",
         done: 0,
         total: selectedNow.length,
         freedBytes: 0,
@@ -498,18 +495,11 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               bytes: i.bytes,
               special: i.special,
             })),
-            dryRun,
-            toRecycleBin,
+            dryRun: false,
+            toRecycleBin: false,
             protectedPaths,
           },
         });
-
-        if (result.dryRun) {
-          setActiveCleanId(null);
-          setReport(result);
-          setPhase("done");
-          return;
-        }
 
         const failedPaths = new Set(result.failures.map((f) => f.path));
         const successIds = selectedNow
@@ -983,14 +973,13 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-3 mb-2">
                   <p className="text-sm font-semibold text-[var(--color-ink)]">
-                    {dryRun ? "正在模拟" : "正在清理"}
+                    正在清理
                   </p>
                   <p
                     key={freedFlash}
                     className="text-sm font-mono tabular-nums text-[var(--color-sea)] animate-freed-flash"
                   >
-                    {dryRun ? "预计 " : "已释放 "}
-                    {formatBytes(animatedFreed)}
+                    已释放 {formatBytes(animatedFreed)}
                   </p>
                 </div>
                 <div className="progress-track h-1.5">
@@ -1095,16 +1084,13 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               {phase === "cleaning" && cleanProgress ? (
                 <>
                   <p className="text-sm font-medium tabular-nums">
-                    {dryRun ? "模拟进度" : "清理进度"}{" "}
-                    {cleanProgress.done}/{cleanProgress.total}
+                    清理进度 {cleanProgress.done}/{cleanProgress.total}
                     <span className="ml-2 font-mono text-[var(--color-sea)]">
                       {formatBytes(animatedFreed)}
                     </span>
                   </p>
                   <p className="mt-1 text-xs text-[var(--color-ink)]/45">
-                    {dryRun
-                      ? "仅统计预计释放空间，不会删除文件"
-                      : "请稍候，正在安全处理所选项目"}
+                    请稍候，正在安全处理所选项目
                   </p>
                 </>
               ) : (
@@ -1168,53 +1154,15 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="confirm-title" className="text-lg font-semibold">
-              {dryRun ? "确认模拟？" : "确认清理？"}
+              确认清理？
             </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
-              {dryRun ? (
-                <>
-                  将模拟处理 <strong>{selectedItems.length}</strong> 项，预计可释放{" "}
-                  <strong className="font-mono">
-                    {formatBytes(selectedBytes)}
-                  </strong>
-                  ，不会实际删除。
-                </>
-              ) : (
-                <>
-                  将{toRecycleBin ? "移到回收站" : "永久删除"}{" "}
-                  <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-                  <strong className="font-mono">
-                    {formatBytes(selectedBytes)}
-                  </strong>
-                  。缓存类目录通常可安全重建；高风险项请确认无程序占用。
-                </>
-              )}
+              将永久删除 <strong>{selectedItems.length}</strong> 项，预计释放{" "}
+              <strong className="font-mono">
+                {formatBytes(selectedBytes)}
+              </strong>
+              。缓存类目录通常可安全重建；高风险项请确认无程序占用。
             </p>
-            <div className="mt-4 space-y-2">
-              <label className="flex items-center gap-2 text-sm text-[var(--color-ink)]/75">
-                <input
-                  type="checkbox"
-                  checked={dryRun}
-                  onChange={(e) => setDryRun(e.target.checked)}
-                  className="accent-[var(--color-sea)]"
-                />
-                仅模拟（不删除）
-              </label>
-              <label className="flex items-center gap-2 text-sm text-[var(--color-ink)]/75">
-                <input
-                  type="checkbox"
-                  checked={toRecycleBin}
-                  disabled={dryRun}
-                  onChange={(e) => {
-                    const v = e.target.checked;
-                    setToRecycleBin(v);
-                    void persistConfig({ toRecycleBinByDefault: v });
-                  }}
-                  className="accent-[var(--color-sea)] disabled:opacity-40"
-                />
-                移到回收站而非永久删除
-              </label>
-            </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -1228,7 +1176,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 onClick={() => void runClean()}
                 className="btn-press rounded-lg px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
-                {dryRun ? "开始模拟" : "确认删除"}
+                确认删除
               </button>
             </div>
           </div>
