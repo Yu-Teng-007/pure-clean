@@ -330,13 +330,6 @@ body {
   }
 }
 
-.home-protect {
-  border-radius: var(--home-radius);
-  border: 1px solid color-mix(in srgb, var(--color-sand) 75%, transparent);
-  background: color-mix(in srgb, white 55%, transparent);
-  padding: 0.875rem 1rem;
-}
-
 .home-input {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
