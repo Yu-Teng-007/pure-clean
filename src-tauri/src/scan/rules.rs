@@ -15,6 +15,33 @@ const SKIP_DIR_NAMES: &[&str] = &[
     "System Volume Information",
 ];
 
+/// Directories already covered by project/cache rules — skip when hunting large files
+/// so we do not double-report artifacts inside `target`, `.next`, etc.
+const LARGE_FILE_SKIP_DIR_NAMES: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".pnpm-store",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "target",
+    ".next",
+    ".turbo",
+    ".vite",
+    ".nuxt",
+    ".output",
+    ".svelte-kit",
+    "dist",
+    "build",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+    "coverage",
+    ".parcel-cache",
+    ".eslintcache",
+];
+
 #[derive(Clone)]
 pub struct MatchRule {
     pub category: Category,
@@ -66,6 +93,12 @@ pub fn make_special_item(
 
 fn should_skip_dir(name: &str) -> bool {
     SKIP_DIR_NAMES
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(name))
+}
+
+fn should_skip_large_file_dir(name: &str) -> bool {
+    LARGE_FILE_SKIP_DIR_NAMES
         .iter()
         .any(|s| s.eq_ignore_ascii_case(name))
 }
@@ -230,6 +263,76 @@ pub fn scan_project_tree(
                 ));
             }
         }
+    }
+
+    items
+}
+
+/// Walk a project root looking for individual files at or above `min_bytes`.
+/// Skips junk/cache directories already covered by other categories.
+pub fn scan_large_files(
+    root: &Path,
+    min_bytes: u64,
+    max_depth: usize,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<ScanItem> {
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    if !root.is_dir() || min_bytes == 0 {
+        return items;
+    }
+
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() && should_skip_large_file_dir(&name) {
+                return false;
+            }
+            true
+        });
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        on_progress(&path.to_string_lossy());
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_file() || meta.len() < min_bytes {
+            continue;
+        }
+
+        let key = path.to_string_lossy().to_string();
+        if !seen.insert(key) {
+            continue;
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        items.push(ScanItem {
+            id: item_id(&path_str),
+            category_label: Category::LargeFiles.label().to_string(),
+            category: Category::LargeFiles,
+            path: path_str,
+            bytes: meta.len(),
+            risk: Risk::Caution,
+            selected_by_default: false,
+            special: None,
+        });
     }
 
     items

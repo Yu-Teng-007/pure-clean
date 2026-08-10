@@ -7,7 +7,8 @@ export type Category =
   | "other_dev"
   | "system_temp"
   | "recycle_bin"
-  | "browser_cache";
+  | "browser_cache"
+  | "large_files";
 
 export type Risk = "safe" | "caution" | "dangerous";
 
@@ -52,10 +53,13 @@ export interface CleanReport {
   failures: CleanFailure[];
 }
 
+export const DEFAULT_MIN_FILE_BYTES = 500 * 1024 * 1024;
+
 export interface AppConfig {
   scanRoots: string[];
   enabledCategories: Category[];
   selectCautionByDefault: boolean;
+  minFileBytes: number;
 }
 
 export function formatBytes(bytes: number): string {
@@ -78,4 +82,11 @@ export const CATEGORY_ORDER: Category[] = [
   "system_temp",
   "recycle_bin",
   "browser_cache",
+  "large_files",
+];
+
+export const MIN_FILE_PRESETS: { label: string; bytes: number }[] = [
+  { label: "100 MB", bytes: 100 * 1024 * 1024 },
+  { label: "500 MB", bytes: 500 * 1024 * 1024 },
+  { label: "1 GB", bytes: 1024 * 1024 * 1024 },
 ];

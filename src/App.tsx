@@ -8,7 +8,9 @@ import {
   Category,
   CleanProgress,
   CleanReport,
+  DEFAULT_MIN_FILE_BYTES,
   formatBytes,
+  MIN_FILE_PRESETS,
   ScanItem,
   ScanProgress,
   ScanResult,
@@ -116,6 +118,7 @@ export default function App() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmLeaving, setConfirmLeaving] = useState(false);
   const [selectCaution, setSelectCaution] = useState(false);
+  const [minFileBytes, setMinFileBytes] = useState(DEFAULT_MIN_FILE_BYTES);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -171,6 +174,7 @@ export default function App() {
         const cfg = await invoke<AppConfig>("load_config");
         setRoots(cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]);
         setSelectCaution(cfg.selectCautionByDefault);
+        setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
       } catch {
         setRoots(["D:\\YHDJA"]);
       }
@@ -209,17 +213,35 @@ export default function App() {
     };
   }, [markExiting]);
 
-  const persistRoots = useCallback(async (next: string[]) => {
-    setRoots(next);
-    try {
-      const cfg = await invoke<AppConfig>("load_config");
-      await invoke("save_config", {
-        config: { ...cfg, scanRoots: next },
-      });
-    } catch {
-      /* ignore persist errors in UI */
-    }
-  }, []);
+  const persistConfig = useCallback(
+    async (patch: Partial<AppConfig> & { scanRoots?: string[] }) => {
+      try {
+        const cfg = await invoke<AppConfig>("load_config");
+        await invoke("save_config", {
+          config: { ...cfg, ...patch },
+        });
+      } catch {
+        /* ignore persist errors in UI */
+      }
+    },
+    [],
+  );
+
+  const persistRoots = useCallback(
+    async (next: string[]) => {
+      setRoots(next);
+      await persistConfig({ scanRoots: next });
+    },
+    [persistConfig],
+  );
+
+  const updateMinFileBytes = useCallback(
+    async (bytes: number) => {
+      setMinFileBytes(bytes);
+      await persistConfig({ minFileBytes: bytes });
+    },
+    [persistConfig],
+  );
 
   const addRoot = async () => {
     const trimmed = rootInput.trim();
@@ -258,6 +280,7 @@ export default function App() {
           roots,
           categories: null,
           maxDepth: 6,
+          minFileBytes,
         },
       });
       setItems(result.items);
@@ -446,7 +469,7 @@ export default function App() {
           Pure Clean
         </h1>
         <p className="mt-2 max-w-xl text-[var(--color-ink)]/65 text-[15px] leading-relaxed">
-          扫描构建产物、依赖缓存与系统临时文件，勾选后安全释放磁盘空间。
+          扫描构建产物、依赖缓存、大文件与系统临时文件，勾选后安全释放磁盘空间。
         </p>
       </header>
 
@@ -501,6 +524,47 @@ export default function App() {
             <span className="text-xs text-[var(--color-ink)]/45 self-center">
               全局缓存与系统路径会自动包含
             </span>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[var(--color-ink)]/55">
+              大文件阈值
+            </span>
+            {MIN_FILE_PRESETS.map((preset) => {
+              const active = minFileBytes === preset.bytes;
+              return (
+                <button
+                  key={preset.bytes}
+                  type="button"
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  onClick={() => void updateMinFileBytes(preset.bytes)}
+                  className={[
+                    "btn-press rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
+                    active
+                      ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                      : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
+                  ].join(" ")}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+            <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
+              自定义
+              <input
+                type="number"
+                min={1}
+                step={1}
+                disabled={phase === "scanning" || phase === "cleaning"}
+                value={Math.max(1, Math.round(minFileBytes / (1024 * 1024)))}
+                onChange={(e) => {
+                  const mb = Number(e.target.value);
+                  if (!Number.isFinite(mb) || mb < 1) return;
+                  void updateMinFileBytes(Math.round(mb) * 1024 * 1024);
+                }}
+                className="w-16 rounded-md border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+              />
+              MB
+            </label>
           </div>
           {phase === "scanning" && scanProgress && (
             <div className="mt-3">

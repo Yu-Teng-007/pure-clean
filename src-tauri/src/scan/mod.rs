@@ -6,9 +6,11 @@ use std::path::Path;
 
 use tauri::{AppHandle, Emitter};
 
+use crate::config::DEFAULT_MIN_FILE_BYTES;
 use crate::model::{Category, ScanProgress, ScanResult};
 use crate::scan::rules::{
-    fixed_dev_paths, fixed_system_paths, recycle_bin_item, scan_fixed_paths, scan_project_tree,
+    fixed_dev_paths, fixed_system_paths, recycle_bin_item, scan_fixed_paths, scan_large_files,
+    scan_project_tree,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -27,11 +29,13 @@ pub fn run_scan(
     roots: &[String],
     categories: Option<Vec<Category>>,
     max_depth: usize,
+    min_file_bytes: Option<u64>,
 ) -> ScanResult {
     let enabled: HashSet<Category> = categories
         .unwrap_or_else(Category::all)
         .into_iter()
         .collect();
+    let min_bytes = min_file_bytes.unwrap_or(DEFAULT_MIN_FILE_BYTES);
 
     let mut items = Vec::new();
     let mut items_found = 0usize;
@@ -50,6 +54,20 @@ pub fn run_scan(
             items_found += 1;
             bytes_found = bytes_found.saturating_add(item.bytes);
             items.push(item);
+        }
+
+        if enabled.contains(&Category::LargeFiles) {
+            let large = scan_large_files(path, min_bytes, max_depth, &mut |p| {
+                emit_progress(app, p, items_found, bytes_found);
+            });
+            for item in large {
+                if items.iter().any(|i| i.path == item.path) {
+                    continue;
+                }
+                items_found += 1;
+                bytes_found = bytes_found.saturating_add(item.bytes);
+                items.push(item);
+            }
         }
     }
 

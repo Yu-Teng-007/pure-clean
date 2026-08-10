@@ -5,12 +5,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::Category;
 
+pub const DEFAULT_MIN_FILE_BYTES: u64 = 500 * 1024 * 1024;
+
+fn default_min_file_bytes() -> u64 {
+    DEFAULT_MIN_FILE_BYTES
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub scan_roots: Vec<String>,
     pub enabled_categories: Vec<Category>,
     pub select_caution_by_default: bool,
+    #[serde(default = "default_min_file_bytes")]
+    pub min_file_bytes: u64,
 }
 
 impl Default for AppConfig {
@@ -30,6 +38,7 @@ impl Default for AppConfig {
             scan_roots,
             enabled_categories: Category::all(),
             select_caution_by_default: false,
+            min_file_bytes: DEFAULT_MIN_FILE_BYTES,
         }
     }
 }

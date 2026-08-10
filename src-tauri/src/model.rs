@@ -12,6 +12,7 @@ pub enum Category {
     SystemTemp,
     RecycleBin,
     BrowserCache,
+    LargeFiles,
 }
 
 impl Category {
@@ -26,6 +27,7 @@ impl Category {
             Category::SystemTemp => "系统临时文件",
             Category::RecycleBin => "回收站",
             Category::BrowserCache => "浏览器缓存",
+            Category::LargeFiles => "大文件",
         }
     }
 
@@ -40,6 +42,7 @@ impl Category {
             Category::SystemTemp,
             Category::RecycleBin,
             Category::BrowserCache,
+            Category::LargeFiles,
         ]
     }
 }
@@ -119,6 +122,9 @@ pub struct ScanRequest {
     pub roots: Vec<String>,
     pub categories: Option<Vec<Category>>,
     pub max_depth: Option<usize>,
+    /// Minimum size for individual files reported under LargeFiles.
+    /// Defaults to 500 MiB when omitted.
+    pub min_file_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

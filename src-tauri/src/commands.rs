@@ -52,7 +52,13 @@ pub fn save_config(config: AppConfig) -> Result<(), String> {
 #[tauri::command]
 pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
     let max_depth = request.max_depth.unwrap_or(6);
-    scan::run_scan(&app, &request.roots, request.categories, max_depth)
+    scan::run_scan(
+        &app,
+        &request.roots,
+        request.categories,
+        max_depth,
+        request.min_file_bytes,
+    )
 }
 
 #[tauri::command]
