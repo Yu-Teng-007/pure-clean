@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { AppTool, AppView } from "./appView";
+import type { AppTool, AppView, CleanBack } from "./appView";
+import CleanToolsHub from "./CleanToolsHub";
 import CleanWorkspace from "./CleanWorkspace";
 import Home from "./Home";
 import OptimizeWorkspace from "./OptimizeWorkspace";
@@ -11,15 +12,29 @@ export default function App() {
   const [view, setView] = useState<AppView>(null);
 
   const goHome = () => setView(null);
-  const enterMode = (mode: CleanMode) => setView({ kind: "clean", mode });
   const openTool = (tool: AppTool) => setView({ kind: "tool", tool });
+  const enterMode = (mode: CleanMode, back: CleanBack = "hub") =>
+    setView({ kind: "clean", mode, back });
+
+  const backFromClean = () => {
+    if (view?.kind === "clean" && view.back === "hub") {
+      openTool("cleanHub");
+      return;
+    }
+    goHome();
+  };
 
   return (
     <div className="h-full flex flex-col">
       <TitleBar />
       <div className="flex-1 min-h-0">
         {view?.kind === "clean" ? (
-          <CleanWorkspace mode={view.mode} onBack={goHome} />
+          <CleanWorkspace mode={view.mode} onBack={backFromClean} />
+        ) : view?.kind === "tool" && view.tool === "cleanHub" ? (
+          <CleanToolsHub
+            onBack={goHome}
+            onEnterMode={(mode) => enterMode(mode, "hub")}
+          />
         ) : view?.kind === "tool" && view.tool === "startup" ? (
           <StartupWorkspace onBack={goHome} />
         ) : view?.kind === "tool" && view.tool === "optimize" ? (
@@ -28,7 +43,7 @@ export default function App() {
             onOpenStartup={() => openTool("startup")}
           />
         ) : (
-          <Home onEnterMode={enterMode} onOpenTool={openTool} />
+          <Home onOpenTool={openTool} />
         )}
       </div>
     </div>

@@ -1,8 +1,10 @@
-export type AppTool = "startup" | "optimize";
+export type AppTool = "startup" | "optimize" | "cleanHub";
+
+export type CleanBack = "home" | "hub";
 
 export type AppView =
   | null
-  | { kind: "clean"; mode: import("./modes").CleanMode }
+  | { kind: "clean"; mode: import("./modes").CleanMode; back: CleanBack }
   | { kind: "tool"; tool: AppTool };
 
 export function locationLabel(location: string): string {

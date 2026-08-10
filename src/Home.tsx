@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
+  Broom,
   ClockCountdown,
   HardDrive,
   HardDrives,
@@ -11,8 +12,6 @@ import {
   ShieldWarning,
 } from "@phosphor-icons/react";
 import type { AppTool } from "./appView";
-import { MODE_ORDER, MODES, type CleanMode } from "./modes";
-import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
 import {
   AppConfig,
@@ -22,11 +21,9 @@ import {
 } from "./types";
 
 interface HomeProps {
-  onEnterMode: (mode: CleanMode) => void;
   onOpenTool: (tool: AppTool) => void;
 }
 
-const SECONDARY_MODES = MODE_ORDER.filter((id) => id !== "safe");
 const MODAL_OUT_MS = 180;
 
 function driveLetter(name: string): string {
@@ -41,7 +38,7 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
+export default function Home({ onOpenTool }: HomeProps) {
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
@@ -116,9 +113,6 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
     setProtectInput("");
   };
 
-  const safe = MODES.safe;
-  const SafeIcon = MODE_ICONS.safe;
-
   return (
     <div className="home-shell h-full flex flex-col overflow-y-auto">
       <header className="home-header px-7 pt-6 pb-4 animate-fade-up">
@@ -128,7 +122,7 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
               Pure Clean
             </h1>
             <p className="mt-1.5 max-w-[36ch] text-[13.5px] leading-relaxed text-[var(--color-ink)]/60">
-              按场景扫描缓存与垃圾文件，安全释放磁盘空间。
+              智能优化与按场景清理，安全释放磁盘空间。
             </p>
           </div>
           <button
@@ -153,26 +147,26 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
           <section
             className="animate-fade-up"
             style={{ animationDelay: "50ms" }}
-            aria-label="推荐清理"
+            aria-label="智能优化"
           >
             <button
               type="button"
-              onClick={() => onEnterMode("safe")}
+              onClick={() => onOpenTool("optimize")}
               className="btn-press home-featured group w-full text-left rounded-2xl p-5 md:p-6"
             >
               <div className="flex items-start gap-4">
                 <span className="home-featured__icon flex size-11 shrink-0 items-center justify-center rounded-2xl">
-                  <SafeIcon size={24} weight="duotone" />
+                  <Lightning size={24} weight="duotone" />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xl font-semibold tracking-[-0.02em] text-white leading-tight">
-                    {safe.title}
+                    智能优化
                   </span>
                   <span className="mt-1.5 block max-w-[42ch] text-[13px] leading-relaxed text-white/72">
-                    {safe.subtitle}
+                    一键安全清理，并建议禁用非必要开机项
                   </span>
                   <span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-[13px] font-semibold text-[var(--color-sea)] group-hover:bg-[var(--color-foam)] group-active:scale-[0.98] transition-[background-color,transform] duration-150">
-                    开始清理
+                    开始体检优化
                     <ArrowRight
                       size={15}
                       weight="bold"
@@ -184,28 +178,25 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
             </button>
           </section>
 
-          <section
-            className="animate-fade-up"
-            style={{ animationDelay: "70ms" }}
-            aria-label="系统工具"
+          <nav
+            className="animate-fade-up min-h-0"
+            style={{ animationDelay: "90ms" }}
+            aria-label="工具"
           >
-            <h2 className="mb-2.5 text-[12px] font-semibold tracking-wide text-[var(--color-ink)]/45 uppercase">
-              系统工具
-            </h2>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <li>
+            <ul className="home-modes grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <li style={{ animationDelay: "110ms" }}>
                 <button
                   type="button"
-                  onClick={() => onOpenTool("optimize")}
+                  onClick={() => onOpenTool("cleanHub")}
                   className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
                 >
                   <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <Lightning size={17} weight="duotone" />
+                    <Broom size={17} weight="duotone" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        智能优化
+                        清理工具
                       </span>
                       <ArrowRight
                         size={13}
@@ -215,12 +206,12 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
                       />
                     </span>
                     <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      一键安全清理并建议禁用非必要开机项
+                      开发、系统、大文件、重复文件等按场景清理
                     </span>
                   </span>
                 </button>
               </li>
-              <li>
+              <li style={{ animationDelay: "138ms" }}>
                 <button
                   type="button"
                   onClick={() => onOpenTool("startup")}
@@ -247,51 +238,6 @@ export default function Home({ onEnterMode, onOpenTool }: HomeProps) {
                   </span>
                 </button>
               </li>
-            </ul>
-          </section>
-
-          <nav
-            className="animate-fade-up min-h-0"
-            style={{ animationDelay: "90ms" }}
-            aria-label="更多清理方式"
-          >
-            <ul className="home-modes grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {SECONDARY_MODES.map((id, index) => {
-                const mode = MODES[id];
-                const ModeIcon = MODE_ICONS[id];
-                return (
-                  <li
-                    key={id}
-                    style={{ animationDelay: `${110 + index * 28}ms` }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onEnterMode(id)}
-                      className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
-                    >
-                      <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                        <ModeIcon size={17} weight="duotone" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                            {mode.title}
-                          </span>
-                          <ArrowRight
-                            size={13}
-                            weight="bold"
-                            className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                            aria-hidden
-                          />
-                        </span>
-                        <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                          {mode.subtitle}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
             </ul>
           </nav>
         </main>
