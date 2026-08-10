@@ -435,6 +435,25 @@ body {
   background: linear-gradient(90deg, #b45309 0%, #d97706 100%);
 }
 
+/* ——— workspace ——— */
+.ws-mode-icon {
+  color: var(--color-sea);
+  background: color-mix(in srgb, var(--color-sea) 10%, white);
+  border: 1px solid color-mix(in srgb, var(--color-sea) 14%, transparent);
+}
+
+.ws-panel,
+.ws-list,
+.ws-empty {
+  border: 1px solid color-mix(in srgb, var(--color-sand) 70%, transparent);
+  background: color-mix(in srgb, white 50%, transparent);
+}
+
+.ws-empty {
+  border-style: dashed;
+  background: color-mix(in srgb, white 35%, transparent);
+}
+
 .progress-track {
   position: relative;
   overflow: hidden;

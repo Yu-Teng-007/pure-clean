@@ -2,7 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  ArrowLeft,
+  FolderSimplePlus,
+  MagnifyingGlass,
+  ShieldWarning,
+  X,
+} from "@phosphor-icons/react";
 import { MODES, type CleanMode } from "./modes";
+import { MODE_ICONS } from "./modeIcons";
+import ProtectPathsModal from "./ProtectPathsModal";
 import {
   AppConfig,
   CATEGORY_ORDER,
@@ -162,6 +171,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
   const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
   const [protectInput, setProtectInput] = useState("");
+  const [protectOpen, setProtectOpen] = useState(false);
+  const [protectLeaving, setProtectLeaving] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -347,6 +358,29 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const removeProtected = async (path: string) => {
     await persistProtected(protectedPaths.filter((p) => p !== path));
   };
+
+  const closeProtect = useCallback(() => {
+    if (protectLeaving) return;
+    if (prefersReducedMotion()) {
+      setProtectOpen(false);
+      setProtectLeaving(false);
+      return;
+    }
+    setProtectLeaving(true);
+    window.setTimeout(() => {
+      setProtectOpen(false);
+      setProtectLeaving(false);
+    }, MODAL_OUT_MS);
+  }, [protectLeaving]);
+
+  useEffect(() => {
+    if (!protectOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeProtect();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [protectOpen, closeProtect]);
 
   const canScan =
     phase !== "scanning" &&
@@ -574,6 +608,20 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const backDisabled = phase === "cleaning";
   const presets = thresholdPresets(mode);
 
+  const ModeIcon = MODE_ICONS[mode];
+  const showFooter =
+    phase === "cleaning" ||
+    ((phase === "ready" || phase === "done") &&
+      items.some((i) => !goneIds.has(i.id)));
+
+  const chipClass = (active: boolean) =>
+    [
+      "btn-press rounded-xl px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
+      active
+        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
+    ].join(" ");
+
   const renderItemRow = (item: ScanItem) => {
     const idx = rowIndex++;
     const isExiting = exitingIds.has(item.id);
@@ -583,8 +631,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
       <li
         key={`${listEpoch}-${item.id}`}
         className={[
-          "flex items-start gap-3 px-4 py-3 transition-[background-color] duration-150",
-          isExiting ? "animate-row-exit" : "animate-row-enter hover:bg-white/60",
+          "ws-row flex items-start gap-3 px-3.5 py-2.5 transition-[background-color] duration-150",
+          isExiting ? "animate-row-exit" : "animate-row-enter hover:bg-white/70",
           isCleaning ? "animate-row-cleaning" : "",
           phase === "cleaning" && isSelected && !isCleaning ? "opacity-70" : "",
         ]
@@ -607,12 +655,12 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={[
-                "text-sm font-mono truncate transition-colors duration-200",
+                "text-[13px] font-mono truncate transition-colors duration-200",
                 isCleaning
                   ? "text-[var(--color-sea)]"
                   : isExiting
                     ? "line-through text-[var(--color-ink)]/35"
-                    : "",
+                    : "text-[var(--color-ink)]/85",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -621,17 +669,17 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               {item.path}
             </span>
             <span
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${riskClass(item.risk)}`}
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${riskClass(item.risk)}`}
             >
               {riskLabel(item.risk)}
             </span>
             {item.isKeeper === true && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
                 保留
               </span>
             )}
             {item.isKeeper === false && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-[var(--color-warn)]">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/10 text-[var(--color-warn)]">
                 副本
               </span>
             )}
@@ -642,7 +690,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             )}
           </div>
         </div>
-        <span className="text-sm font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/70">
+        <span className="text-[13px] font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/55">
           {formatBytes(item.bytes)}
         </span>
       </li>
@@ -650,32 +698,58 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   };
 
   return (
-    <div className="min-h-full flex flex-col">
-      <header className="px-8 pt-6 pb-4 animate-fade-up">
-        <button
-          type="button"
-          onClick={onBack}
-          disabled={backDisabled}
-          className="btn-press mb-4 text-sm text-[var(--color-sea)] hover:underline disabled:opacity-40 disabled:no-underline"
-        >
-          ← 返回
-        </button>
-        <p className="text-[var(--color-sea)] text-sm font-medium tracking-[0.18em] uppercase mb-2">
-          Pure Clean
-        </p>
-        <h1 className="text-3xl font-semibold tracking-tight text-[var(--color-ink)]">
-          {meta.title}
-        </h1>
-        <p className="mt-2 max-w-xl text-[var(--color-ink)]/65 text-[15px] leading-relaxed">
-          {meta.subtitle}
-        </p>
+    <div className="ws-shell min-h-full flex flex-col">
+      <header className="ws-header px-7 pt-5 pb-4 animate-fade-up">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex items-start gap-3">
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={backDisabled}
+              className="btn-press mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-sand)]/80 bg-white/55 text-[var(--color-sea)] hover:bg-white disabled:opacity-40"
+              aria-label="返回首页"
+            >
+              <ArrowLeft size={16} weight="bold" />
+            </button>
+            <span className="ws-mode-icon mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl">
+              <ModeIcon size={22} weight="duotone" />
+            </span>
+            <div className="min-w-0 pt-0.5">
+              <h1 className="text-[1.35rem] font-semibold tracking-[-0.02em] text-[var(--color-ink)] leading-tight text-balance">
+                {meta.title}
+              </h1>
+              <p className="mt-1 max-w-[48ch] text-[13px] leading-relaxed text-[var(--color-ink)]/55">
+                {meta.subtitle}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setProtectOpen(true)}
+            disabled={backDisabled}
+            className="btn-press shrink-0 inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)] disabled:opacity-40"
+            aria-haspopup="dialog"
+          >
+            <ShieldWarning
+              size={15}
+              weight="duotone"
+              className="text-[var(--color-warn)]"
+            />
+            保护路径
+            {protectedPaths.length > 0 && (
+              <span className="rounded-md bg-[var(--color-warn)]/12 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warn)]">
+                {protectedPaths.length}
+              </span>
+            )}
+          </button>
+        </div>
       </header>
 
       <section
-        className="px-8 pb-4 animate-fade-up"
-        style={{ animationDelay: "60ms" }}
+        className="px-7 pb-4 animate-fade-up"
+        style={{ animationDelay: "50ms" }}
       >
-        <div className="rounded-2xl border border-[var(--color-sand)]/80 bg-white/55 backdrop-blur-sm px-5 py-4">
+        <div className="ws-panel rounded-2xl p-4">
           {meta.needsRoots && (
             <>
               <div className="flex flex-wrap gap-2 items-center">
@@ -684,21 +758,25 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                   onChange={(e) => setRootInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && void addRoot()}
                   placeholder="添加扫描根目录，如 D:\YHDJA"
-                  className="flex-1 min-w-[220px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] transition-[border-color] duration-150"
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  className="home-input flex-1 min-w-[200px] rounded-xl border border-[var(--color-sand)] bg-white/85 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
                 <button
                   type="button"
                   onClick={() => void addRoot()}
-                  className="btn-press rounded-lg border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)]"
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)] disabled:opacity-50"
                 >
-                  添加 / 浏览
+                  <FolderSimplePlus size={15} weight="bold" />
+                  添加
                 </button>
                 <button
                   type="button"
                   onClick={() => void startScan()}
                   disabled={!canScan}
-                  className="btn-press rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
+                  className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
                 >
+                  <MagnifyingGlass size={15} weight="bold" />
                   {phase === "scanning" ? "扫描中…" : "开始扫描"}
                 </button>
               </div>
@@ -706,16 +784,17 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 {roots.map((r) => (
                   <span
                     key={r}
-                    className="inline-flex items-center gap-2 rounded-full bg-[var(--color-mist)] px-3 py-1 text-xs font-mono text-[var(--color-ink)]/80"
+                    className="inline-flex max-w-full items-center gap-2 rounded-xl bg-[var(--color-mist)] px-3 py-1.5 text-xs font-mono text-[var(--color-ink)]/80"
                   >
-                    {r}
+                    <span className="truncate">{r}</span>
                     <button
                       type="button"
                       onClick={() => void removeRoot(r)}
-                      className="btn-press text-[var(--color-ink)]/45 hover:text-[var(--color-danger)]"
+                      disabled={phase === "scanning" || phase === "cleaning"}
+                      className="btn-press shrink-0 rounded-md p-0.5 text-[var(--color-ink)]/40 hover:text-[var(--color-danger)] disabled:opacity-40"
                       aria-label={`移除 ${r}`}
                     >
-                      ×
+                      <X size={12} weight="bold" />
                     </button>
                   </span>
                 ))}
@@ -729,8 +808,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           )}
 
           {!meta.needsRoots && (
-            <div className="flex flex-wrap gap-2 items-center justify-between">
-              <p className="text-sm text-[var(--color-ink)]/60">
+            <div className="flex flex-wrap gap-3 items-center justify-between">
+              <p className="text-[13px] text-[var(--color-ink)]/60 max-w-[52ch] leading-relaxed">
                 {mode === "docker"
                   ? "将扫描 Docker / WSL 虚拟磁盘，并可执行 docker system prune"
                   : "将扫描系统临时目录、回收站、浏览器与系统缓存"}
@@ -739,8 +818,9 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 type="button"
                 onClick={() => void startScan()}
                 disabled={!canScan}
-                className="btn-press rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
+                className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
               >
+                <MagnifyingGlass size={15} weight="bold" />
                 {phase === "scanning" ? "扫描中…" : "开始扫描"}
               </button>
             </div>
@@ -750,31 +830,23 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             <div
               className={[
                 "flex flex-wrap items-center gap-2",
-                meta.needsRoots ? "mt-3" : "",
+                meta.needsRoots ? "mt-3 pt-3 border-t border-[var(--color-sand)]/50" : "mt-1",
               ].join(" ")}
             >
               <span className="text-xs text-[var(--color-ink)]/55">
                 {thresholdLabel(mode)}
               </span>
-              {presets.map((preset) => {
-                const active = minFileBytes === preset.bytes;
-                return (
-                  <button
-                    key={preset.bytes}
-                    type="button"
-                    disabled={phase === "scanning" || phase === "cleaning"}
-                    onClick={() => void updateMinFileBytes(preset.bytes)}
-                    className={[
-                      "btn-press rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
-                      active
-                        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
-                        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
-                    ].join(" ")}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
+              {presets.map((preset) => (
+                <button
+                  key={preset.bytes}
+                  type="button"
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  onClick={() => void updateMinFileBytes(preset.bytes)}
+                  className={chipClass(minFileBytes === preset.bytes)}
+                >
+                  {preset.label}
+                </button>
+              ))}
               <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
                 自定义
                 <input
@@ -788,7 +860,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     if (!Number.isFinite(mb) || mb < 1) return;
                     void updateMinFileBytes(Math.round(mb) * 1024 * 1024);
                   }}
-                  className="w-16 rounded-md border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+                  className="w-16 rounded-lg border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
                 MB
               </label>
@@ -799,31 +871,25 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             <div
               className={[
                 "flex flex-wrap items-center gap-2",
-                meta.needsRoots || meta.needsThreshold ? "mt-3" : "",
+                meta.needsRoots || meta.needsThreshold
+                  ? "mt-3 pt-3 border-t border-[var(--color-sand)]/50"
+                  : "mt-1",
               ].join(" ")}
             >
               <span className="text-xs text-[var(--color-ink)]/55">
                 {mode === "stale" ? "闲置天数" : "闲置 node_modules"}
               </span>
-              {STALE_DAY_PRESETS.map((preset) => {
-                const active = staleDays === preset.days;
-                return (
-                  <button
-                    key={preset.days}
-                    type="button"
-                    disabled={phase === "scanning" || phase === "cleaning"}
-                    onClick={() => void updateStaleDays(preset.days)}
-                    className={[
-                      "btn-press rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
-                      active
-                        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
-                        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
-                    ].join(" ")}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
+              {STALE_DAY_PRESETS.map((preset) => (
+                <button
+                  key={preset.days}
+                  type="button"
+                  disabled={phase === "scanning" || phase === "cleaning"}
+                  onClick={() => void updateStaleDays(preset.days)}
+                  className={chipClass(staleDays === preset.days)}
+                >
+                  {preset.label}
+                </button>
+              ))}
               <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
                 自定义
                 <input
@@ -837,62 +903,20 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     if (!Number.isFinite(days) || days < 1) return;
                     void updateStaleDays(Math.round(days));
                   }}
-                  className="w-16 rounded-md border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+                  className="w-16 rounded-lg border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
                 天未修改
               </label>
             </div>
           )}
 
-          <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50">
-            <p className="text-xs text-[var(--color-ink)]/55 mb-2">
-              保护路径（永不扫描 / 删除）
-            </p>
-            <div className="flex flex-wrap gap-2 items-center">
-              <input
-                value={protectInput}
-                onChange={(e) => setProtectInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void addProtected()}
-                placeholder="添加保护目录"
-                className="flex-1 min-w-[180px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-1.5 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)]"
-              />
-              <button
-                type="button"
-                onClick={() => void addProtected()}
-                className="btn-press rounded-lg border border-[var(--color-sand)] bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--color-mist)]"
-              >
-                添加
-              </button>
-            </div>
-            {protectedPaths.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {protectedPaths.map((p) => (
-                  <span
-                    key={p}
-                    className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-mono text-[var(--color-warn)]"
-                  >
-                    {p}
-                    <button
-                      type="button"
-                      onClick={() => void removeProtected(p)}
-                      className="btn-press hover:text-[var(--color-danger)]"
-                      aria-label={`移除保护 ${p}`}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
           {phase === "scanning" && scanProgress && (
-            <div className="mt-3">
+            <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50">
               <div className="scan-rail" aria-hidden />
               <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
                 {scanProgress.currentPath}
                 <span className="ml-2">
-                  · 已发现 {scanProgress.itemsFound} 项 /{" "}
+                  已发现 {scanProgress.itemsFound} 项 /{" "}
                   {formatBytes(scanProgress.bytesFound)}
                 </span>
               </p>
@@ -905,42 +929,55 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
       </section>
 
       <main
-        className="flex-1 px-8 pb-28 overflow-auto animate-fade-up"
-        style={{ animationDelay: "120ms" }}
+        className={[
+          "flex-1 px-7 overflow-auto animate-fade-up",
+          showFooter ? "pb-28" : "pb-7",
+        ].join(" ")}
+        style={{ animationDelay: "90ms" }}
       >
         {phase === "idle" && items.length === 0 && (
-          <div className="h-48 flex items-center justify-center text-[var(--color-ink)]/40 text-sm">
-            {meta.emptyHint}
+          <div className="ws-empty flex flex-col items-center justify-center rounded-2xl px-6 py-14 text-center">
+            <span className="ws-mode-icon mb-3 flex size-12 items-center justify-center rounded-2xl opacity-80">
+              <ModeIcon size={26} weight="duotone" />
+            </span>
+            <p className="text-[13.5px] text-[var(--color-ink)]/50 max-w-[36ch] leading-relaxed">
+              {meta.emptyHint}
+            </p>
           </div>
         )}
 
         {phase === "done" && report && (
-          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/30 bg-[var(--color-sea)]/8 px-5 py-4 animate-fade-up animate-success-glow">
+          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/25 bg-[var(--color-sea)]/8 px-5 py-4 animate-fade-up animate-success-glow">
             <div className="flex items-start gap-3">
               <SuccessCheck />
               <div className="min-w-0 flex-1">
-                <p className="text-lg font-semibold text-[var(--color-sea)] tabular-nums">
+                <p className="text-lg font-semibold text-[var(--color-sea)] tabular-nums tracking-tight">
                   {report.dryRun
                     ? "模拟释放 "
                     : report.toRecycleBin
                       ? "已移入回收站 "
-                      : "预计释放 "}
+                      : "已释放 "}
                   {formatBytes(animatedReportFreed)}
                 </p>
-                <p className="text-sm text-[var(--color-ink)]/65 mt-1">
+                <p className="text-[13px] text-[var(--color-ink)]/60 mt-1">
                   成功 {report.successCount} 项
                   {report.failures.length > 0 &&
                     ` · 失败 ${report.failures.length} 项`}
                   {report.dryRun && " · 未实际删除"}
                 </p>
                 {report.byCategory?.length > 0 && (
-                  <ul className="mt-2 space-y-1">
+                  <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
                     {report.byCategory.map((c) => (
                       <li
                         key={c.category}
-                        className="text-xs text-[var(--color-ink)]/60"
+                        className="rounded-xl bg-white/50 px-3 py-2 text-xs text-[var(--color-ink)]/65"
                       >
-                        {c.label} · {c.count} 项 · {formatBytes(c.freedBytes)}
+                        <span className="font-medium text-[var(--color-ink)]/80">
+                          {c.label}
+                        </span>
+                        <span className="ml-2 font-mono">
+                          {c.count} 项 · {formatBytes(c.freedBytes)}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -963,7 +1000,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         )}
 
         {phase === "cleaning" && cleanProgress && (
-          <div className="mb-5 rounded-2xl border border-[var(--color-sea)]/20 bg-white/50 backdrop-blur-sm px-5 py-4 animate-fade-up">
+          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/20 bg-white/55 px-5 py-4 animate-fade-up">
             <div className="flex items-center gap-4">
               <div className="clean-orb" aria-hidden>
                 <div className="clean-orb__ring" />
@@ -1001,7 +1038,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           </div>
         )}
 
-        <div className="space-y-5">
+        <div className="space-y-4">
           {grouped.map(([category, catItems]) => {
             const visibleItems = catItems.filter((i) => !goneIds.has(i.id));
             if (visibleItems.length === 0) return null;
@@ -1028,44 +1065,44 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
 
             return (
               <section key={category}>
-                <div className="flex items-baseline justify-between mb-2 px-1">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-sm font-semibold tracking-wide">
+                <div className="flex items-center justify-between mb-2 px-0.5 gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <h2 className="text-[13px] font-semibold tracking-tight text-[var(--color-ink)]">
                       {label}
                     </h2>
                     <button
                       type="button"
                       onClick={() => toggleCategory(catItems, !allOn)}
                       disabled={phase === "cleaning"}
-                      className="text-xs text-[var(--color-sea)] hover:underline disabled:opacity-40"
+                      className="btn-press text-xs text-[var(--color-sea)] hover:underline disabled:opacity-40"
                     >
                       {allOn ? "取消全选" : "全选"}
                     </button>
                   </div>
-                  <span className="text-xs font-mono text-[var(--color-ink)]/50">
+                  <span className="shrink-0 text-[11px] font-mono text-[var(--color-ink)]/45">
                     {formatBytes(catBytes)} · {visibleItems.length} 项
                   </span>
                 </div>
 
                 {dupeGroups ? (
-                  <div className="space-y-3">
+                  <div className="space-y-2.5">
                     {dupeGroups.map(([gid, group]) => (
                       <div
                         key={gid}
-                        className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 overflow-hidden"
+                        className="ws-list rounded-2xl overflow-hidden"
                       >
-                        <div className="px-4 py-2 text-xs text-[var(--color-ink)]/55 border-b border-[var(--color-sand)]/50">
+                        <div className="px-3.5 py-2 text-[11px] text-[var(--color-ink)]/50 border-b border-[var(--color-sand)]/50 bg-white/30">
                           重复组 · {group.length} 份 ·{" "}
                           {formatBytes(group[0]?.bytes ?? 0)}
                         </div>
-                        <ul className="divide-y divide-[var(--color-sand)]/50">
+                        <ul className="divide-y divide-[var(--color-sand)]/45">
                           {group.map((item) => renderItemRow(item))}
                         </ul>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <ul className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 divide-y divide-[var(--color-sand)]/50 overflow-hidden">
+                  <ul className="ws-list rounded-2xl divide-y divide-[var(--color-sand)]/45 overflow-hidden">
                     {visibleItems.map((item) => renderItemRow(item))}
                   </ul>
                 )}
@@ -1075,12 +1112,10 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         </div>
       </main>
 
-      {(phase === "cleaning" ||
-        ((phase === "ready" || phase === "done") &&
-          items.some((i) => !goneIds.has(i.id)))) && (
-        <footer className="fixed bottom-0 inset-x-0 border-t border-[var(--color-sand)] bg-[var(--color-foam)]/90 backdrop-blur-md px-8 py-4 animate-footer-rise">
+      {showFooter && (
+        <footer className="fixed bottom-0 inset-x-0 z-40 border-t border-[var(--color-sand)]/80 bg-[var(--color-foam)]/92 backdrop-blur-md px-7 py-3.5 animate-footer-rise">
           <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
-            <div>
+            <div className="min-w-0">
               {phase === "cleaning" && cleanProgress ? (
                 <>
                   <p className="text-sm font-medium tabular-nums">
@@ -1089,7 +1124,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                       {formatBytes(animatedFreed)}
                     </span>
                   </p>
-                  <p className="mt-1 text-xs text-[var(--color-ink)]/45">
+                  <p className="mt-0.5 text-xs text-[var(--color-ink)]/45">
                     请稍候，正在安全处理所选项目
                   </p>
                 </>
@@ -1127,7 +1162,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 setConfirmLeaving(false);
                 setConfirmOpen(true);
               }}
-              className="btn-press rounded-lg bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
+              className="btn-press rounded-xl bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
             >
               {phase === "cleaning" ? "处理中…" : "清理所选"}
             </button>
@@ -1153,7 +1188,10 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             ].join(" ")}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 id="confirm-title" className="text-lg font-semibold">
+            <h3
+              id="confirm-title"
+              className="text-lg font-semibold tracking-tight"
+            >
               确认清理？
             </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
@@ -1167,14 +1205,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               <button
                 type="button"
                 onClick={() => closeConfirm()}
-                className="btn-press rounded-lg px-4 py-2 text-sm border border-[var(--color-sand)] hover:bg-[var(--color-mist)]"
+                className="btn-press rounded-xl px-4 py-2 text-sm border border-[var(--color-sand)] hover:bg-[var(--color-mist)]"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={() => void runClean()}
-                className="btn-press rounded-lg px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
+                className="btn-press rounded-xl px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
                 确认删除
               </button>
@@ -1182,6 +1220,17 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           </div>
         </div>
       )}
+
+      <ProtectPathsModal
+        open={protectOpen}
+        leaving={protectLeaving}
+        paths={protectedPaths}
+        input={protectInput}
+        onInputChange={setProtectInput}
+        onAdd={() => void addProtected()}
+        onRemove={(p) => void removeProtected(p)}
+        onClose={closeProtect}
+      />
     </div>
   );
 }
