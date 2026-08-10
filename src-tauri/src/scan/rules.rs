@@ -67,6 +67,8 @@ pub fn make_item(path: PathBuf, category: Category, risk: Risk, selected: bool) 
         risk,
         selected_by_default: selected,
         special: None,
+        group_id: None,
+        is_keeper: None,
     }
 }
 
@@ -88,6 +90,8 @@ pub fn make_special_item(
         risk,
         selected_by_default: selected,
         special: Some(special.to_string()),
+        group_id: None,
+        is_keeper: None,
     }
 }
 
@@ -332,6 +336,8 @@ pub fn scan_large_files(
             risk: Risk::Caution,
             selected_by_default: false,
             special: None,
+            group_id: None,
+            is_keeper: None,
         });
     }
 
@@ -814,7 +820,357 @@ pub fn make_file_or_dir_item(
         risk,
         selected_by_default: selected,
         special: None,
+        group_id: None,
+        is_keeper: None,
     }
+}
+
+fn file_content_hash(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 1024 * 64];
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Some(hex::encode(hasher.finalize()))
+}
+
+const FILE_SCAN_SKIP: &[&str] = &[
+    ".git",
+    "node_modules",
+    ".pnpm-store",
+    "$Recycle.Bin",
+    "System Volume Information",
+    "target",
+    ".next",
+    ".turbo",
+    ".vite",
+    ".nuxt",
+    ".output",
+    ".svelte-kit",
+    "__pycache__",
+];
+
+fn should_skip_file_scan_dir(name: &str) -> bool {
+    FILE_SCAN_SKIP
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(name))
+}
+
+/// Find duplicate files by size then content hash. Keep the oldest path; select copies.
+pub fn scan_duplicate_files(
+    root: &Path,
+    min_bytes: u64,
+    max_depth: usize,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<ScanItem> {
+    use std::collections::HashMap;
+
+    let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
+
+    if !root.is_dir() || min_bytes == 0 {
+        return Vec::new();
+    }
+
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() && should_skip_file_scan_dir(&name) {
+                return false;
+            }
+            true
+        });
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        on_progress(&path.to_string_lossy());
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() < min_bytes {
+            continue;
+        }
+        by_size.entry(meta.len()).or_default().push(path.to_path_buf());
+    }
+
+    let mut items = Vec::new();
+    for (size, paths) in by_size {
+        if paths.len() < 2 {
+            continue;
+        }
+        let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for path in paths {
+            on_progress(&path.to_string_lossy());
+            if let Some(hash) = file_content_hash(&path) {
+                by_hash.entry(hash).or_default().push(path);
+            }
+        }
+        for (hash, mut group) in by_hash {
+            if group.len() < 2 {
+                continue;
+            }
+            group.sort_by(|a, b| {
+                let ta = std::fs::metadata(a)
+                    .and_then(|m| m.modified())
+                    .ok();
+                let tb = std::fs::metadata(b)
+                    .and_then(|m| m.modified())
+                    .ok();
+                match (ta, tb) {
+                    (Some(x), Some(y)) => x.cmp(&y),
+                    _ => a.cmp(b),
+                }
+            });
+            let group_id = format!("dupe:{}", &hash[..16.min(hash.len())]);
+            for (idx, path) in group.into_iter().enumerate() {
+                let path_str = path.to_string_lossy().to_string();
+                let is_keeper = idx == 0;
+                items.push(ScanItem {
+                    id: item_id(&path_str),
+                    category_label: Category::DuplicateFiles.label().to_string(),
+                    category: Category::DuplicateFiles,
+                    path: path_str,
+                    bytes: size,
+                    risk: Risk::Caution,
+                    selected_by_default: !is_keeper,
+                    special: None,
+                    group_id: Some(group_id.clone()),
+                    is_keeper: Some(is_keeper),
+                });
+            }
+        }
+    }
+
+    items
+}
+
+/// Files not modified for `stale_days` under root (and optional Downloads).
+pub fn scan_stale_files(
+    root: &Path,
+    stale_days: u64,
+    max_depth: usize,
+    min_bytes: u64,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<ScanItem> {
+    use std::time::{Duration, SystemTime};
+
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    if !root.is_dir() {
+        return items;
+    }
+
+    let min_age = Duration::from_secs(stale_days.saturating_mul(24 * 60 * 60));
+    let now = SystemTime::now();
+    let floor = min_bytes.max(1);
+
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() && should_skip_file_scan_dir(&name) {
+                return false;
+            }
+            true
+        });
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        on_progress(&path.to_string_lossy());
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() < floor {
+            continue;
+        }
+        let modified = match meta.modified() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let age = match now.duration_since(modified) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if age < min_age {
+            continue;
+        }
+        let key = path.to_string_lossy().to_string();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        items.push(ScanItem {
+            id: item_id(&key),
+            category_label: Category::StaleFiles.label().to_string(),
+            category: Category::StaleFiles,
+            path: key,
+            bytes: meta.len(),
+            risk: Risk::Caution,
+            selected_by_default: false,
+            special: None,
+            group_id: None,
+            is_keeper: None,
+        });
+    }
+
+    items
+}
+
+fn is_installer_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".msi")
+        || lower.ends_with(".iso")
+        || lower.ends_with(".img")
+        || lower.ends_with(".dmg")
+    {
+        return true;
+    }
+    if lower.ends_with(".exe") {
+        return lower.contains("setup")
+            || lower.contains("install")
+            || lower.contains("installer")
+            || lower.starts_with("setup")
+            || lower.contains("-setup")
+            || lower.contains("_setup");
+    }
+    false
+}
+
+fn is_android_sdk_residue(path: &Path) -> bool {
+    let s = path.to_string_lossy().to_ascii_lowercase();
+    s.contains("android")
+        && (s.contains("system-images")
+            || s.contains("\\ndk\\")
+            || s.contains("/ndk/")
+            || s.contains("\\ndk-bundle")
+            || s.contains("emulator"))
+}
+
+/// Installer packages, disk images, and common Android SDK bulky leftovers.
+pub fn scan_installers(
+    root: &Path,
+    max_depth: usize,
+    min_bytes: u64,
+    on_progress: &mut dyn FnMut(&str),
+) -> Vec<ScanItem> {
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let floor = min_bytes.max(1);
+
+    if !root.is_dir() {
+        return items;
+    }
+
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() && should_skip_file_scan_dir(&name) {
+                return false;
+            }
+            true
+        });
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        on_progress(&path.to_string_lossy());
+
+        if entry.file_type().is_dir() {
+            let name = entry.file_name().to_string_lossy();
+            if matches!(name.as_ref(), "system-images" | "ndk" | "ndk-bundle")
+                && is_android_sdk_residue(path)
+            {
+                let key = path.to_string_lossy().to_string();
+                if seen.insert(key) {
+                    let bytes = dir_size_bytes(path);
+                    if bytes >= floor {
+                        items.push(make_item(
+                            path.to_path_buf(),
+                            Category::Installers,
+                            Risk::Caution,
+                            false,
+                        ));
+                    }
+                }
+            }
+            continue;
+        }
+
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if !is_installer_name(&name) {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() < floor {
+            continue;
+        }
+        let key = path.to_string_lossy().to_string();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        items.push(ScanItem {
+            id: item_id(&key),
+            category_label: Category::Installers.label().to_string(),
+            category: Category::Installers,
+            path: key,
+            bytes: meta.len(),
+            risk: Risk::Caution,
+            selected_by_default: false,
+            special: None,
+            group_id: None,
+            is_keeper: None,
+        });
+    }
+
+    items
+}
+
+pub fn downloads_dir() -> Option<PathBuf> {
+    dirs::download_dir()
 }
 
 pub fn scan_fixed_paths(

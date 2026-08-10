@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -5,9 +6,11 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
-use crate::model::{CleanFailure, CleanProgress, CleanReport};
+use crate::config;
+use crate::model::{
+    Category, CategoryFreed, CleanFailure, CleanProgress, CleanReport, CleanTarget,
+};
 
-/// Result of a best-effort delete: bytes actually removed + optional skip summary.
 struct RemoveOutcome {
     freed_bytes: u64,
     skipped: usize,
@@ -25,8 +28,6 @@ fn clear_readonly(path: &Path) {
 }
 
 fn classify_io_error(err: &io::Error) -> String {
-    // Windows: 5 = access denied, 32 = sharing violation, 33 = lock violation,
-    // 145 = directory not empty (often leftover after locked children were skipped)
     match err.raw_os_error() {
         Some(5) => format!("拒绝访问: {err}（可能需要管理员权限，或文件被占用）"),
         Some(32) | Some(33) => format!("文件被占用: {err}（请关闭相关程序后重试）"),
@@ -45,7 +46,6 @@ fn classify_io_error(err: &io::Error) -> String {
     }
 }
 
-/// Prefer actionable root-cause messages over consequential "dir not empty".
 fn remember_error(slot: &mut Option<String>, next: String) {
     let next_is_consequence = next.contains("目录不是空的");
     match slot {
@@ -79,7 +79,6 @@ fn remove_one(path: &Path) -> Result<u64, String> {
     }
 }
 
-/// Delete as much as possible under `path`. Locked / denied entries are skipped.
 fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
     if !path.exists() {
         return RemoveOutcome {
@@ -89,7 +88,6 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
         };
     }
 
-    // Single file
     if path.is_file() {
         return match remove_one(path) {
             Ok(n) => RemoveOutcome {
@@ -109,8 +107,6 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
     let mut skipped = 0usize;
     let mut last_error: Option<String> = None;
 
-    // Collect paths deepest-first so we remove files before their parents.
-    // Do not silently drop WalkDir I/O errors — those are often the real skip cause.
     let mut entries: Vec<PathBuf> = Vec::new();
     for entry in WalkDir::new(path)
         .follow_links(false)
@@ -130,15 +126,12 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
         }
     }
 
-    // Ensure root itself is last (contents_first usually puts it last already).
     entries.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
 
     for entry in entries {
         match remove_one(&entry) {
             Ok(n) => freed_bytes = freed_bytes.saturating_add(n),
             Err(e) => {
-                // Parent "not empty" after skipped children is expected — still count the skip,
-                // but keep the child root-cause in last_error when present.
                 let consequence = e.contains("目录不是空的");
                 if !(consequence && skipped > 0) {
                     skipped += 1;
@@ -148,7 +141,6 @@ fn remove_path_best_effort(path: &Path) -> RemoveOutcome {
         }
     }
 
-    // If root remains and looks empty enough, try once more (race / delayed unlock).
     if path.exists() {
         match remove_one(path) {
             Ok(_) => {}
@@ -179,11 +171,6 @@ fn empty_recycle_bin() -> Result<(), String> {
     };
 
     const FLAGS: u32 = SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND;
-    // Treat these as success / already empty:
-    // - S_OK
-    // - 0x80070002 / 0x80070003 (not found)
-    // - 0x80270021 (empty on some builds)
-    // - 0x8000FFFF E_UNEXPECTED (Win10/11 often returns this even when empty/partial OK)
     fn hr_ok(hr: i32) -> bool {
         matches!(
             hr as u32,
@@ -194,7 +181,6 @@ fn empty_recycle_bin() -> Result<(), String> {
     let mut any_ok = false;
     let mut last_bad: Option<u32> = None;
 
-    // Prefer per-drive emptying — more reliable than NULL (all drives) on Win10/11.
     for letter in 'A'..='Z' {
         let root = format!("{letter}:\\");
         if !Path::new(&root).exists() {
@@ -213,7 +199,6 @@ fn empty_recycle_bin() -> Result<(), String> {
         return Ok(());
     }
 
-    // Fallback: all drives at once
     let hr = unsafe { SHEmptyRecycleBinW(std::ptr::null_mut(), std::ptr::null(), FLAGS) };
     if hr_ok(hr) {
         return Ok(());
@@ -227,6 +212,55 @@ fn empty_recycle_bin() -> Result<(), String> {
 #[cfg(not(windows))]
 fn empty_recycle_bin() -> Result<(), String> {
     Err("回收站清理仅支持 Windows".into())
+}
+
+#[cfg(windows)]
+fn move_to_recycle_bin(path: &Path) -> Result<u64, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::{
+        SHFileOperationW, FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
+        SHFILEOPSTRUCTW,
+    };
+
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let bytes = if path.is_file() {
+        fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        crate::scan::size::dir_size_bytes(path)
+    };
+
+    clear_readonly(path);
+
+    let mut from: Vec<u16> = path.as_os_str().encode_wide().collect();
+    from.push(0);
+    from.push(0);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd: std::ptr::null_mut(),
+        wFunc: FO_DELETE as u32,
+        pFrom: from.as_ptr(),
+        pTo: std::ptr::null(),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT) as u16,
+        fAnyOperationsAborted: 0,
+        hNameMappings: std::ptr::null_mut(),
+        lpszProgressTitle: std::ptr::null(),
+    };
+
+    let result = unsafe { SHFileOperationW(&mut op) };
+    if result != 0 || op.fAnyOperationsAborted != 0 {
+        return Err(format!(
+            "移到回收站失败 (code {result})，可尝试永久删除或检查文件占用"
+        ));
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(windows))]
+fn move_to_recycle_bin(_path: &Path) -> Result<u64, String> {
+    Err("移到回收站仅支持 Windows".into())
 }
 
 fn run_docker_prune() -> Result<String, String> {
@@ -276,12 +310,32 @@ fn format_skip_message(path: &str, outcome: &RemoveOutcome) -> String {
     }
 }
 
-pub fn run_clean(app: &AppHandle, paths: &[String], specials: &[String]) -> CleanReport {
-    let total = paths.len() + specials.len();
+fn record_category(
+    map: &mut HashMap<Category, (u64, usize)>,
+    category: Option<&Category>,
+    bytes: u64,
+) {
+    let Some(cat) = category else {
+        return;
+    };
+    let entry = map.entry(cat.clone()).or_insert((0, 0));
+    entry.0 = entry.0.saturating_add(bytes);
+    entry.1 += 1;
+}
+
+pub fn run_clean(
+    app: &AppHandle,
+    targets: &[CleanTarget],
+    dry_run: bool,
+    to_recycle_bin: bool,
+    protected_paths: &[String],
+) -> CleanReport {
+    let total = targets.len();
     let mut done = 0usize;
     let mut freed_bytes = 0u64;
     let mut success_count = 0usize;
     let mut failures = Vec::new();
+    let mut by_cat: HashMap<Category, (u64, usize)> = HashMap::new();
 
     let emit = |current_path: &str, done: usize, freed_bytes: u64| {
         let _ = app.emit(
@@ -295,67 +349,140 @@ pub fn run_clean(app: &AppHandle, paths: &[String], specials: &[String]) -> Clea
         );
     };
 
-    for special in specials {
-        emit(special, done, freed_bytes);
-        match special.as_str() {
-            "recycle_bin" => match empty_recycle_bin() {
-                Ok(()) => {
-                    success_count += 1;
-                }
-                Err(e) => failures.push(CleanFailure {
-                    path: "回收站".into(),
-                    error: e,
-                }),
-            },
-            "docker_prune" => match run_docker_prune() {
-                Ok(msg) => {
-                    success_count += 1;
-                    let _ = msg;
-                }
-                Err(e) => failures.push(CleanFailure {
-                    path: "Docker system prune".into(),
-                    error: e,
-                }),
-            },
-            other => failures.push(CleanFailure {
-                path: other.to_string(),
-                error: format!("未知特殊项: {other}"),
-            }),
-        }
-        done += 1;
-        emit(special, done, freed_bytes);
-    }
+    for target in targets {
+        let label = target
+            .special
+            .as_deref()
+            .map(|s| match s {
+                "recycle_bin" => "回收站",
+                "docker_prune" => "Docker system prune",
+                other => other,
+            })
+            .unwrap_or(target.path.as_str());
 
-    for path_str in paths {
-        emit(path_str, done, freed_bytes);
-        let path = Path::new(path_str);
-        let outcome = remove_path_best_effort(path);
+        emit(label, done, freed_bytes);
+
+        if target.special.is_none() && config::is_protected(Path::new(&target.path), protected_paths)
+        {
+            failures.push(CleanFailure {
+                path: target.path.clone(),
+                error: "路径在保护白名单中，已跳过".into(),
+            });
+            done += 1;
+            emit(label, done, freed_bytes);
+            continue;
+        }
+
+        if dry_run {
+            let estimate = target.bytes.unwrap_or(0);
+            freed_bytes = freed_bytes.saturating_add(estimate);
+            success_count += 1;
+            record_category(&mut by_cat, target.category.as_ref(), estimate);
+            done += 1;
+            emit(label, done, freed_bytes);
+            continue;
+        }
+
+        if let Some(special) = target.special.as_deref() {
+            match special {
+                "recycle_bin" => match empty_recycle_bin() {
+                    Ok(()) => {
+                        let estimate = target.bytes.unwrap_or(0);
+                        freed_bytes = freed_bytes.saturating_add(estimate);
+                        success_count += 1;
+                        record_category(&mut by_cat, target.category.as_ref(), estimate);
+                    }
+                    Err(e) => failures.push(CleanFailure {
+                        path: "回收站".into(),
+                        error: e,
+                    }),
+                },
+                "docker_prune" => match run_docker_prune() {
+                    Ok(_) => {
+                        success_count += 1;
+                        record_category(&mut by_cat, target.category.as_ref(), 0);
+                    }
+                    Err(e) => failures.push(CleanFailure {
+                        path: "Docker system prune".into(),
+                        error: e,
+                    }),
+                },
+                other => failures.push(CleanFailure {
+                    path: other.to_string(),
+                    error: format!("未知特殊项: {other}"),
+                }),
+            }
+            done += 1;
+            emit(label, done, freed_bytes);
+            continue;
+        }
+
+        let path = Path::new(&target.path);
+        let outcome = if to_recycle_bin {
+            match move_to_recycle_bin(path) {
+                Ok(n) => RemoveOutcome {
+                    freed_bytes: n,
+                    skipped: 0,
+                    last_error: None,
+                },
+                Err(e) => RemoveOutcome {
+                    freed_bytes: 0,
+                    skipped: 1,
+                    last_error: Some(e),
+                },
+            }
+        } else {
+            remove_path_best_effort(path)
+        };
 
         if outcome.skipped == 0 {
             freed_bytes = freed_bytes.saturating_add(outcome.freed_bytes);
             success_count += 1;
+            record_category(
+                &mut by_cat,
+                target.category.as_ref(),
+                outcome.freed_bytes,
+            );
         } else if outcome.freed_bytes > 0 {
-            // Partial success: count freed space, still surface a soft failure note.
             freed_bytes = freed_bytes.saturating_add(outcome.freed_bytes);
             success_count += 1;
+            record_category(
+                &mut by_cat,
+                target.category.as_ref(),
+                outcome.freed_bytes,
+            );
             failures.push(CleanFailure {
-                path: path_str.clone(),
-                error: format_skip_message(path_str, &outcome),
+                path: target.path.clone(),
+                error: format_skip_message(&target.path, &outcome),
             });
         } else {
             failures.push(CleanFailure {
-                path: path_str.clone(),
-                error: format_skip_message(path_str, &outcome),
+                path: target.path.clone(),
+                error: format_skip_message(&target.path, &outcome),
             });
         }
 
         done += 1;
-        emit(path_str, done, freed_bytes);
+        emit(label, done, freed_bytes);
     }
+
+    let mut by_category: Vec<CategoryFreed> = by_cat
+        .into_iter()
+        .map(|(category, (freed, count))| CategoryFreed {
+            label: category.label().to_string(),
+            category,
+            freed_bytes: freed,
+            count,
+        })
+        .collect();
+    by_category.sort_by(|a, b| b.freed_bytes.cmp(&a.freed_bytes));
 
     CleanReport {
         freed_bytes,
         success_count,
         failures,
+        by_category,
+        dry_run,
+        to_recycle_bin,
     }
 }

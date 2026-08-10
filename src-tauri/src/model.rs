@@ -16,6 +16,9 @@ pub enum Category {
     BrowserCache,
     LargeFiles,
     DockerWsl,
+    DuplicateFiles,
+    StaleFiles,
+    Installers,
 }
 
 impl Category {
@@ -34,6 +37,9 @@ impl Category {
             Category::BrowserCache => "浏览器缓存",
             Category::LargeFiles => "大文件",
             Category::DockerWsl => "Docker / WSL",
+            Category::DuplicateFiles => "重复文件",
+            Category::StaleFiles => "闲置文件",
+            Category::Installers => "安装包 / 镜像",
         }
     }
 
@@ -52,6 +58,9 @@ impl Category {
             Category::BrowserCache,
             Category::LargeFiles,
             Category::DockerWsl,
+            Category::DuplicateFiles,
+            Category::StaleFiles,
+            Category::Installers,
         ]
     }
 }
@@ -75,6 +84,12 @@ pub struct ScanItem {
     pub risk: Risk,
     pub selected_by_default: bool,
     pub special: Option<String>,
+    /// Duplicate-file group id (same content hash).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    /// When true, this is the kept original in a duplicate group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_keeper: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,10 +126,25 @@ pub struct CleanFailure {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CategoryFreed {
+    pub category: Category,
+    pub label: String,
+    pub freed_bytes: u64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CleanReport {
     pub freed_bytes: u64,
     pub success_count: usize,
     pub failures: Vec<CleanFailure>,
+    #[serde(default)]
+    pub by_category: Vec<CategoryFreed>,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub to_recycle_bin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,19 +161,50 @@ pub struct ScanRequest {
     pub roots: Vec<String>,
     pub categories: Option<Vec<Category>>,
     pub max_depth: Option<usize>,
-    /// Minimum size for individual files reported under LargeFiles.
-    /// Defaults to 500 MiB when omitted.
     pub min_file_bytes: Option<u64>,
-    /// Only report node_modules directories whose mtime is at least this many days ago.
-    /// Defaults to 30 when omitted and NodeModules is enabled.
     pub stale_days: Option<u64>,
-    /// When true, drop items that are not Risk::Safe after scanning.
     pub safe_only: Option<bool>,
+    pub protected_paths: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanTarget {
+    pub path: String,
+    pub category: Option<Category>,
+    pub bytes: Option<u64>,
+    pub special: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanRequest {
-    pub paths: Vec<String>,
+    pub paths: Option<Vec<String>>,
     pub specials: Option<Vec<String>>,
+    pub targets: Option<Vec<CleanTarget>>,
+    pub dry_run: Option<bool>,
+    pub to_recycle_bin: Option<bool>,
+    pub protected_paths: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveInfo {
+    pub name: String,
+    pub total_bytes: u64,
+    pub free_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub id: String,
+    pub timestamp: String,
+    pub mode: Option<String>,
+    pub freed_bytes: u64,
+    pub success_count: usize,
+    pub failure_count: usize,
+    pub dry_run: bool,
+    pub to_recycle_bin: bool,
+    pub by_category: Vec<CategoryFreed>,
 }

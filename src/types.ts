@@ -11,7 +11,10 @@ export type Category =
   | "recycle_bin"
   | "browser_cache"
   | "large_files"
-  | "docker_wsl";
+  | "docker_wsl"
+  | "duplicate_files"
+  | "stale_files"
+  | "installers";
 
 export type Risk = "safe" | "caution" | "dangerous";
 
@@ -24,6 +27,8 @@ export interface ScanItem {
   risk: Risk;
   selectedByDefault: boolean;
   special: string | null;
+  groupId?: string | null;
+  isKeeper?: boolean | null;
 }
 
 export interface ScanResult {
@@ -50,14 +55,44 @@ export interface CleanFailure {
   error: string;
 }
 
+export interface CategoryFreed {
+  category: Category;
+  label: string;
+  freedBytes: number;
+  count: number;
+}
+
 export interface CleanReport {
   freedBytes: number;
   successCount: number;
   failures: CleanFailure[];
+  byCategory: CategoryFreed[];
+  dryRun: boolean;
+  toRecycleBin: boolean;
+}
+
+export interface DriveInfo {
+  name: string;
+  totalBytes: number;
+  freeBytes: number;
+}
+
+export interface HistoryEntry {
+  id: string;
+  timestamp: string;
+  mode: string | null;
+  freedBytes: number;
+  successCount: number;
+  failureCount: number;
+  dryRun: boolean;
+  toRecycleBin: boolean;
+  byCategory: CategoryFreed[];
 }
 
 export const DEFAULT_MIN_FILE_BYTES = 500 * 1024 * 1024;
 export const DEFAULT_STALE_DAYS = 30;
+export const DEFAULT_DUPE_MIN_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_INSTALLER_MIN_BYTES = 50 * 1024 * 1024;
 
 export interface AppConfig {
   scanRoots: string[];
@@ -65,6 +100,8 @@ export interface AppConfig {
   selectCautionByDefault: boolean;
   minFileBytes: number;
   staleDays: number;
+  protectedPaths: string[];
+  toRecycleBinByDefault: boolean;
 }
 
 export function formatBytes(bytes: number): string {
@@ -91,12 +128,27 @@ export const CATEGORY_ORDER: Category[] = [
   "browser_cache",
   "large_files",
   "docker_wsl",
+  "duplicate_files",
+  "stale_files",
+  "installers",
 ];
 
 export const MIN_FILE_PRESETS: { label: string; bytes: number }[] = [
   { label: "100 MB", bytes: 100 * 1024 * 1024 },
   { label: "500 MB", bytes: 500 * 1024 * 1024 },
   { label: "1 GB", bytes: 1024 * 1024 * 1024 },
+];
+
+export const DUPE_MIN_PRESETS: { label: string; bytes: number }[] = [
+  { label: "1 MB", bytes: 1 * 1024 * 1024 },
+  { label: "10 MB", bytes: 10 * 1024 * 1024 },
+  { label: "50 MB", bytes: 50 * 1024 * 1024 },
+];
+
+export const INSTALLER_MIN_PRESETS: { label: string; bytes: number }[] = [
+  { label: "10 MB", bytes: 10 * 1024 * 1024 },
+  { label: "50 MB", bytes: 50 * 1024 * 1024 },
+  { label: "100 MB", bytes: 100 * 1024 * 1024 },
 ];
 
 export const STALE_DAY_PRESETS: { label: string; days: number }[] = [

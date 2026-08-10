@@ -1,6 +1,8 @@
 mod clean;
 mod commands;
 mod config;
+mod drives;
+mod history;
 mod model;
 mod scan;
 
@@ -17,6 +19,8 @@ pub fn run() {
             commands::scan,
             commands::clean,
             commands::format_bytes,
+            commands::list_drives,
+            commands::load_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pure Clean");

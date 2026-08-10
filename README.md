@@ -1,6 +1,6 @@
 # Pure Clean
 
-面向开发者的 Windows 桌面磁盘清理工具。首页提供多种入口：一键安全清理、开发清理、系统清理、大文件清理、Docker / WSL；进入后按场景扫描并安全删除。
+面向开发者的 Windows 桌面磁盘清理工具。首页提供多种入口，进入后按场景扫描并安全删除。
 
 ## 技术栈
 
@@ -22,18 +22,26 @@ npm run tauri:build
 
 ## 清理入口
 
-- **一键安全清理**：合并扫描开发与系统中的「安全」项，默认全选，降低决策成本
-- **开发清理**：项目根内的构建产物，npm / yarn / pnpm、Gradle / Maven、pip、Cargo 等全局缓存，Cursor / VS Code / JetBrains IDE 缓存，以及超过闲置天数（默认 30 天）的 `node_modules`
-- **系统清理**：`%TEMP%`、回收站、Chrome / Edge / Brave / Firefox 缓存、缩略图、Delivery Optimization、Prefetch、Windows Update 下载缓存、Windows.old（无需配置根目录）
-- **大文件清理**：仅在已配置的扫描根目录内查找 ≥ 阈值（默认 500 MB，可调）的单个文件；默认不勾选
-- **Docker / WSL**：Docker Desktop / WSL 虚拟磁盘（vhdx），以及 `docker system prune`（高风险，默认不勾选）
+- **一键安全清理**：仅保留「安全」风险项并默认全选
+- **开发清理**：构建产物、包管理器 / 语言工具缓存、IDE 缓存、闲置 `node_modules`
+- **系统清理**：临时目录、回收站、浏览器缓存、缩略图、Delivery Optimization、Prefetch、Windows Update、Windows.old
+- **大文件清理**：扫描根内 ≥ 阈值（默认 500 MB）的单个文件
+- **重复文件**：按大小 + 内容哈希分组；默认只勾选副本、保留一份
+- **闲置文件**：扫描根与「下载」文件夹中超过 N 天未修改的文件
+- **安装包 / 镜像**：`*.msi` / setup 类 `*.exe` / `*.iso` 与 Android SDK 残留
+- **Docker / WSL**：虚拟磁盘（vhdx）与 `docker system prune`
 
-默认项目根：`D:\YHDJA`（若存在，可在开发 / 大文件 / 安全清理入口中增删）。配置保存在 `%APPDATA%\pure-clean\config.json`。
+默认项目根：`D:\YHDJA`（若存在）。配置保存在 `%APPDATA%\pure-clean\config.json`，清理历史在 `history.json`。
 
-## 安全说明
+## 体验与安全
 
-- 扫描与删除分离；删除前需二次确认
-- Maven 仓库、pnpm store、浏览器缓存、大文件、IDE 缓存、node_modules、Docker / WSL 等默认不勾选
-- 清理进行中不可返回首页
-- 删除失败时会提示文件占用，请关闭相关程序后重试
-- 删除 Docker / WSL 虚拟磁盘前请先关闭 Docker Desktop 并执行 `wsl --shutdown`
+- 扫描与删除分离；删除前二次确认
+- **保护路径**：永不扫描 / 删除的白名单（首页与工作台均可配置）
+- **模拟清理（Dry-run）**：只估算释放空间，不实际删除
+- **移到回收站**：可选代替永久删除
+- 清理报告按分类汇总，并写入本地历史
+- 首页展示各盘剩余空间与最近清理记录
+- Maven / pnpm store / 浏览器缓存 / 大文件 / IDE / node_modules / Docker 等默认不勾选
+- 清理进行中不可返回首页；删除失败会提示文件占用
+
+删除 Docker / WSL 虚拟磁盘前请先关闭 Docker Desktop 并执行 `wsl --shutdown`。

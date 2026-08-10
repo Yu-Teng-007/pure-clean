@@ -9,9 +9,13 @@ import {
   Category,
   CleanProgress,
   CleanReport,
+  DEFAULT_DUPE_MIN_BYTES,
+  DEFAULT_INSTALLER_MIN_BYTES,
   DEFAULT_MIN_FILE_BYTES,
   DEFAULT_STALE_DAYS,
+  DUPE_MIN_PRESETS,
   formatBytes,
+  INSTALLER_MIN_PRESETS,
   MIN_FILE_PRESETS,
   STALE_DAY_PRESETS,
   ScanItem,
@@ -51,6 +55,27 @@ function prefersReducedMotion(): boolean {
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
+}
+
+function defaultThresholdBytes(mode: CleanMode): number {
+  const kind = MODES[mode].thresholdKind;
+  if (kind === "dupes") return DEFAULT_DUPE_MIN_BYTES;
+  if (kind === "installers") return DEFAULT_INSTALLER_MIN_BYTES;
+  return DEFAULT_MIN_FILE_BYTES;
+}
+
+function thresholdPresets(mode: CleanMode) {
+  const kind = MODES[mode].thresholdKind;
+  if (kind === "dupes") return DUPE_MIN_PRESETS;
+  if (kind === "installers") return INSTALLER_MIN_PRESETS;
+  return MIN_FILE_PRESETS;
+}
+
+function thresholdLabel(mode: CleanMode): string {
+  const kind = MODES[mode].thresholdKind;
+  if (kind === "dupes") return "最小文件大小";
+  if (kind === "installers") return "最小体积";
+  return "大文件阈值";
 }
 
 function useAnimatedNumber(target: number, duration = 420): number {
@@ -131,8 +156,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmLeaving, setConfirmLeaving] = useState(false);
   const [selectCaution, setSelectCaution] = useState(false);
-  const [minFileBytes, setMinFileBytes] = useState(DEFAULT_MIN_FILE_BYTES);
+  const [minFileBytes, setMinFileBytes] = useState(() =>
+    defaultThresholdBytes(mode),
+  );
   const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
+  const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
+  const [protectInput, setProtectInput] = useState("");
+  const [toRecycleBin, setToRecycleBin] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -188,13 +219,19 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         const cfg = await invoke<AppConfig>("load_config");
         setRoots(cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]);
         setSelectCaution(cfg.selectCautionByDefault);
-        setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
         setStaleDays(cfg.staleDays ?? DEFAULT_STALE_DAYS);
+        setProtectedPaths(cfg.protectedPaths ?? []);
+        setToRecycleBin(cfg.toRecycleBinByDefault ?? false);
+        if (meta.needsThreshold) {
+          setMinFileBytes(defaultThresholdBytes(mode));
+        } else {
+          setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
+        }
       } catch {
         setRoots(["D:\\YHDJA"]);
       }
     })();
-  }, []);
+  }, [meta.needsThreshold, mode]);
 
   useEffect(() => {
     let unsubs: Array<() => void> = [];
@@ -229,14 +266,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   }, [markExiting]);
 
   const persistConfig = useCallback(
-    async (patch: Partial<AppConfig> & { scanRoots?: string[] }) => {
+    async (patch: Partial<AppConfig>) => {
       try {
         const cfg = await invoke<AppConfig>("load_config");
         await invoke("save_config", {
           config: { ...cfg, ...patch },
         });
       } catch {
-        /* ignore persist errors in UI */
+        /* ignore */
       }
     },
     [],
@@ -253,15 +290,25 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const updateMinFileBytes = useCallback(
     async (bytes: number) => {
       setMinFileBytes(bytes);
-      await persistConfig({ minFileBytes: bytes });
+      if (meta.thresholdKind === "large") {
+        await persistConfig({ minFileBytes: bytes });
+      }
     },
-    [persistConfig],
+    [persistConfig, meta.thresholdKind],
   );
 
   const updateStaleDays = useCallback(
     async (days: number) => {
       setStaleDays(days);
       await persistConfig({ staleDays: days });
+    },
+    [persistConfig],
+  );
+
+  const persistProtected = useCallback(
+    async (next: string[]) => {
+      setProtectedPaths(next);
+      await persistConfig({ protectedPaths: next });
     },
     [persistConfig],
   );
@@ -283,6 +330,25 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
 
   const removeRoot = async (path: string) => {
     await persistRoots(roots.filter((r) => r !== path));
+  };
+
+  const addProtected = async () => {
+    const trimmed = protectInput.trim();
+    if (!trimmed) {
+      const picked = await open({ directory: true, multiple: false });
+      if (typeof picked === "string" && !protectedPaths.includes(picked)) {
+        await persistProtected([...protectedPaths, picked]);
+      }
+      return;
+    }
+    if (!protectedPaths.includes(trimmed)) {
+      await persistProtected([...protectedPaths, trimmed]);
+    }
+    setProtectInput("");
+  };
+
+  const removeProtected = async (path: string) => {
+    await persistProtected(protectedPaths.filter((p) => p !== path));
   };
 
   const canScan =
@@ -307,10 +373,11 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         request: {
           roots: meta.needsRoots ? roots : [],
           categories: meta.categories,
-          maxDepth: 6,
+          maxDepth: mode === "dupes" ? 8 : 6,
           minFileBytes: meta.needsThreshold ? minFileBytes : undefined,
           staleDays: meta.needsStaleDays ? staleDays : undefined,
           safeOnly: meta.safeOnly ? true : undefined,
+          protectedPaths,
         },
       });
       setItems(result.items);
@@ -417,21 +484,32 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         selectedRef.current.has(i.id),
       );
       setCleanProgress({
-        currentPath: "开始清理…",
+        currentPath: dryRun ? "模拟清理…" : "开始清理…",
         done: 0,
         total: selectedNow.length,
         freedBytes: 0,
       });
       try {
-        const paths = selectedNow
-          .filter((i) => !i.special)
-          .map((i) => i.path);
-        const specials = selectedNow
-          .filter((i) => i.special)
-          .map((i) => i.special as string);
         const result = await invoke<CleanReport>("clean", {
-          request: { paths, specials },
+          request: {
+            targets: selectedNow.map((i) => ({
+              path: i.path,
+              category: i.category,
+              bytes: i.bytes,
+              special: i.special,
+            })),
+            dryRun,
+            toRecycleBin,
+            protectedPaths,
+          },
         });
+
+        if (result.dryRun) {
+          setActiveCleanId(null);
+          setReport(result);
+          setPhase("done");
+          return;
+        }
 
         const failedPaths = new Set(result.failures.map((f) => f.path));
         const successIds = selectedNow
@@ -504,6 +582,82 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
 
   let rowIndex = 0;
   const backDisabled = phase === "cleaning";
+  const presets = thresholdPresets(mode);
+
+  const renderItemRow = (item: ScanItem) => {
+    const idx = rowIndex++;
+    const isExiting = exitingIds.has(item.id);
+    const isCleaning = phase === "cleaning" && activeCleanId === item.id;
+    const isSelected = selected.has(item.id);
+    return (
+      <li
+        key={`${listEpoch}-${item.id}`}
+        className={[
+          "flex items-start gap-3 px-4 py-3 transition-[background-color] duration-150",
+          isExiting ? "animate-row-exit" : "animate-row-enter hover:bg-white/60",
+          isCleaning ? "animate-row-cleaning" : "",
+          phase === "cleaning" && isSelected && !isCleaning ? "opacity-70" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        style={
+          isExiting
+            ? undefined
+            : { animationDelay: `${Math.min(idx, 24) * 28}ms` }
+        }
+      >
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={() => toggleItem(item.id)}
+          disabled={phase === "cleaning" || isExiting}
+          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={[
+                "text-sm font-mono truncate transition-colors duration-200",
+                isCleaning
+                  ? "text-[var(--color-sea)]"
+                  : isExiting
+                    ? "line-through text-[var(--color-ink)]/35"
+                    : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              title={item.path}
+            >
+              {item.path}
+            </span>
+            <span
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${riskClass(item.risk)}`}
+            >
+              {riskLabel(item.risk)}
+            </span>
+            {item.isKeeper === true && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
+                保留
+              </span>
+            )}
+            {item.isKeeper === false && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-[var(--color-warn)]">
+                副本
+              </span>
+            )}
+            {isCleaning && (
+              <span className="text-[10px] font-medium text-[var(--color-sea-bright)] animate-pulse-soft">
+                清理中
+              </span>
+            )}
+          </div>
+        </div>
+        <span className="text-sm font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/70">
+          {formatBytes(item.bytes)}
+        </span>
+      </li>
+    );
+  };
 
   return (
     <div className="min-h-full flex flex-col">
@@ -538,20 +692,20 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 <input
                   value={rootInput}
                   onChange={(e) => setRootInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addRoot()}
+                  onKeyDown={(e) => e.key === "Enter" && void addRoot()}
                   placeholder="添加扫描根目录，如 D:\YHDJA"
                   className="flex-1 min-w-[220px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] transition-[border-color] duration-150"
                 />
                 <button
                   type="button"
-                  onClick={addRoot}
+                  onClick={() => void addRoot()}
                   className="btn-press rounded-lg border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)]"
                 >
                   添加 / 浏览
                 </button>
                 <button
                   type="button"
-                  onClick={startScan}
+                  onClick={() => void startScan()}
                   disabled={!canScan}
                   className="btn-press rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
                 >
@@ -567,7 +721,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     {r}
                     <button
                       type="button"
-                      onClick={() => removeRoot(r)}
+                      onClick={() => void removeRoot(r)}
                       className="btn-press text-[var(--color-ink)]/45 hover:text-[var(--color-danger)]"
                       aria-label={`移除 ${r}`}
                     >
@@ -575,12 +729,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     </button>
                   </span>
                 ))}
-                {mode === "dev" && (
-                  <span className="text-xs text-[var(--color-ink)]/45 self-center">
-                    {meta.rootsHint ?? "全局开发缓存路径会自动包含"}
-                  </span>
-                )}
-                {mode === "safe" && meta.rootsHint && (
+                {meta.rootsHint && (
                   <span className="text-xs text-[var(--color-ink)]/45 self-center">
                     {meta.rootsHint}
                   </span>
@@ -598,7 +747,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               </p>
               <button
                 type="button"
-                onClick={startScan}
+                onClick={() => void startScan()}
                 disabled={!canScan}
                 className="btn-press rounded-lg bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
               >
@@ -615,9 +764,9 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               ].join(" ")}
             >
               <span className="text-xs text-[var(--color-ink)]/55">
-                大文件阈值
+                {thresholdLabel(mode)}
               </span>
-              {MIN_FILE_PRESETS.map((preset) => {
+              {presets.map((preset) => {
                 const active = minFileBytes === preset.bytes;
                 return (
                   <button
@@ -664,7 +813,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               ].join(" ")}
             >
               <span className="text-xs text-[var(--color-ink)]/55">
-                闲置 node_modules
+                {mode === "stale" ? "闲置天数" : "闲置 node_modules"}
               </span>
               {STALE_DAY_PRESETS.map((preset) => {
                 const active = staleDays === preset.days;
@@ -705,6 +854,48 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             </div>
           )}
 
+          <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50">
+            <p className="text-xs text-[var(--color-ink)]/55 mb-2">
+              保护路径（永不扫描 / 删除）
+            </p>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                value={protectInput}
+                onChange={(e) => setProtectInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void addProtected()}
+                placeholder="添加保护目录"
+                className="flex-1 min-w-[180px] rounded-lg border border-[var(--color-sand)] bg-white/80 px-3 py-1.5 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)]"
+              />
+              <button
+                type="button"
+                onClick={() => void addProtected()}
+                className="btn-press rounded-lg border border-[var(--color-sand)] bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-[var(--color-mist)]"
+              >
+                添加
+              </button>
+            </div>
+            {protectedPaths.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {protectedPaths.map((p) => (
+                  <span
+                    key={p}
+                    className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-mono text-[var(--color-warn)]"
+                  >
+                    {p}
+                    <button
+                      type="button"
+                      onClick={() => void removeProtected(p)}
+                      className="btn-press hover:text-[var(--color-danger)]"
+                      aria-label={`移除保护 ${p}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {phase === "scanning" && scanProgress && (
             <div className="mt-3">
               <div className="scan-rail" aria-hidden />
@@ -739,13 +930,31 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               <SuccessCheck />
               <div className="min-w-0 flex-1">
                 <p className="text-lg font-semibold text-[var(--color-sea)] tabular-nums">
-                  预计释放 {formatBytes(animatedReportFreed)}
+                  {report.dryRun
+                    ? "模拟释放 "
+                    : report.toRecycleBin
+                      ? "已移入回收站 "
+                      : "预计释放 "}
+                  {formatBytes(animatedReportFreed)}
                 </p>
                 <p className="text-sm text-[var(--color-ink)]/65 mt-1">
                   成功 {report.successCount} 项
                   {report.failures.length > 0 &&
                     ` · 失败 ${report.failures.length} 项`}
+                  {report.dryRun && " · 未实际删除"}
                 </p>
+                {report.byCategory?.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {report.byCategory.map((c) => (
+                      <li
+                        key={c.category}
+                        className="text-xs text-[var(--color-ink)]/60"
+                      >
+                        {c.label} · {c.count} 项 · {formatBytes(c.freedBytes)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {report.failures.length > 0 && (
                   <ul className="mt-2 space-y-1">
                     {report.failures.map((f) => (
@@ -774,13 +983,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-3 mb-2">
                   <p className="text-sm font-semibold text-[var(--color-ink)]">
-                    正在清理
+                    {dryRun ? "正在模拟" : "正在清理"}
                   </p>
                   <p
                     key={freedFlash}
                     className="text-sm font-mono tabular-nums text-[var(--color-sea)] animate-freed-flash"
                   >
-                    已释放 {formatBytes(animatedFreed)}
+                    {dryRun ? "预计 " : "已释放 "}
+                    {formatBytes(animatedFreed)}
                   </p>
                 </div>
                 <div className="progress-track h-1.5">
@@ -812,6 +1022,21 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             const allOn =
               selectable.length > 0 &&
               selectable.every((i) => selected.has(i.id));
+
+            const dupeGroups =
+              category === "duplicate_files"
+                ? (() => {
+                    const g = new Map<string, ScanItem[]>();
+                    for (const item of visibleItems) {
+                      const key = item.groupId ?? item.id;
+                      const list = g.get(key) ?? [];
+                      list.push(item);
+                      g.set(key, list);
+                    }
+                    return [...g.entries()];
+                  })()
+                : null;
+
             return (
               <section key={category}>
                 <div className="flex items-baseline justify-between mb-2 px-1">
@@ -832,79 +1057,29 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     {formatBytes(catBytes)} · {visibleItems.length} 项
                   </span>
                 </div>
-                <ul className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 divide-y divide-[var(--color-sand)]/50 overflow-hidden">
-                  {visibleItems.map((item) => {
-                    const idx = rowIndex++;
-                    const isExiting = exitingIds.has(item.id);
-                    const isCleaning =
-                      phase === "cleaning" && activeCleanId === item.id;
-                    const isSelected = selected.has(item.id);
-                    return (
-                      <li
-                        key={`${listEpoch}-${item.id}`}
-                        className={[
-                          "flex items-start gap-3 px-4 py-3 transition-[background-color] duration-150",
-                          isExiting
-                            ? "animate-row-exit"
-                            : "animate-row-enter hover:bg-white/60",
-                          isCleaning ? "animate-row-cleaning" : "",
-                          phase === "cleaning" && isSelected && !isCleaning
-                            ? "opacity-70"
-                            : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        style={
-                          isExiting
-                            ? undefined
-                            : {
-                                animationDelay: `${Math.min(idx, 24) * 28}ms`,
-                              }
-                        }
+
+                {dupeGroups ? (
+                  <div className="space-y-3">
+                    {dupeGroups.map(([gid, group]) => (
+                      <div
+                        key={gid}
+                        className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 overflow-hidden"
                       >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleItem(item.id)}
-                          disabled={phase === "cleaning" || isExiting}
-                          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={[
-                                "text-sm font-mono truncate transition-colors duration-200",
-                                isCleaning
-                                  ? "text-[var(--color-sea)]"
-                                  : isExiting
-                                    ? "line-through text-[var(--color-ink)]/35"
-                                    : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ")}
-                              title={item.path}
-                            >
-                              {item.path}
-                            </span>
-                            <span
-                              className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${riskClass(item.risk)}`}
-                            >
-                              {riskLabel(item.risk)}
-                            </span>
-                            {isCleaning && (
-                              <span className="text-[10px] font-medium text-[var(--color-sea-bright)] animate-pulse-soft">
-                                清理中
-                              </span>
-                            )}
-                          </div>
+                        <div className="px-4 py-2 text-xs text-[var(--color-ink)]/55 border-b border-[var(--color-sand)]/50">
+                          重复组 · {group.length} 份 ·{" "}
+                          {formatBytes(group[0]?.bytes ?? 0)}
                         </div>
-                        <span className="text-sm font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/70">
-                          {formatBytes(item.bytes)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
+                        <ul className="divide-y divide-[var(--color-sand)]/50">
+                          {group.map((item) => renderItemRow(item))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <ul className="rounded-xl border border-[var(--color-sand)]/70 bg-white/40 divide-y divide-[var(--color-sand)]/50 overflow-hidden">
+                    {visibleItems.map((item) => renderItemRow(item))}
+                  </ul>
+                )}
               </section>
             );
           })}
@@ -914,62 +1089,65 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
       {(phase === "cleaning" ||
         ((phase === "ready" || phase === "done") &&
           items.some((i) => !goneIds.has(i.id)))) && (
-          <footer className="fixed bottom-0 inset-x-0 border-t border-[var(--color-sand)] bg-[var(--color-foam)]/90 backdrop-blur-md px-8 py-4 animate-footer-rise">
-            <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
-              <div>
-                {phase === "cleaning" && cleanProgress ? (
-                  <>
-                    <p className="text-sm font-medium tabular-nums">
-                      清理进度 {cleanProgress.done}/{cleanProgress.total}
-                      <span className="ml-2 font-mono text-[var(--color-sea)]">
-                        {formatBytes(animatedFreed)}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-xs text-[var(--color-ink)]/45">
-                      请稍候，正在安全删除所选项目
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-medium">
-                      已选 {selectedItems.length} 项 ·{" "}
-                      <span className="font-mono text-[var(--color-sea)]">
-                        {formatBytes(selectedBytes)}
-                      </span>
-                    </p>
-                    <div className="mt-1 flex gap-3 text-xs">
-                      <button
-                        type="button"
-                        onClick={selectAllSafe}
-                        className="text-[var(--color-sea)] hover:underline"
-                      >
-                        仅选安全项
-                      </button>
-                      <button
-                        type="button"
-                        onClick={clearSelection}
-                        className="text-[var(--color-ink)]/50 hover:underline"
-                      >
-                        清空选择
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-              <button
-                type="button"
-                disabled={selectedItems.length === 0 || phase === "cleaning"}
-                onClick={() => {
-                  setConfirmLeaving(false);
-                  setConfirmOpen(true);
-                }}
-                className="btn-press rounded-lg bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
-              >
-                {phase === "cleaning" ? "清理中…" : "清理所选"}
-              </button>
+        <footer className="fixed bottom-0 inset-x-0 border-t border-[var(--color-sand)] bg-[var(--color-foam)]/90 backdrop-blur-md px-8 py-4 animate-footer-rise">
+          <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
+            <div>
+              {phase === "cleaning" && cleanProgress ? (
+                <>
+                  <p className="text-sm font-medium tabular-nums">
+                    {dryRun ? "模拟进度" : "清理进度"}{" "}
+                    {cleanProgress.done}/{cleanProgress.total}
+                    <span className="ml-2 font-mono text-[var(--color-sea)]">
+                      {formatBytes(animatedFreed)}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--color-ink)]/45">
+                    {dryRun
+                      ? "仅统计预计释放空间，不会删除文件"
+                      : "请稍候，正在安全处理所选项目"}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">
+                    已选 {selectedItems.length} 项 ·{" "}
+                    <span className="font-mono text-[var(--color-sea)]">
+                      {formatBytes(selectedBytes)}
+                    </span>
+                  </p>
+                  <div className="mt-1 flex gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={selectAllSafe}
+                      className="text-[var(--color-sea)] hover:underline"
+                    >
+                      仅选安全项
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="text-[var(--color-ink)]/50 hover:underline"
+                    >
+                      清空选择
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
-          </footer>
-        )}
+            <button
+              type="button"
+              disabled={selectedItems.length === 0 || phase === "cleaning"}
+              onClick={() => {
+                setConfirmLeaving(false);
+                setConfirmOpen(true);
+              }}
+              className="btn-press rounded-lg bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
+            >
+              {phase === "cleaning" ? "处理中…" : "清理所选"}
+            </button>
+          </div>
+        </footer>
+      )}
 
       {confirmOpen && (
         <div
@@ -990,15 +1168,53 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="confirm-title" className="text-lg font-semibold">
-              确认清理？
+              {dryRun ? "确认模拟？" : "确认清理？"}
             </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
-              将删除 <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-              <strong className="font-mono">
-                {formatBytes(selectedBytes)}
-              </strong>
-              。缓存类目录通常可安全重建；高风险项请确认无程序占用。
+              {dryRun ? (
+                <>
+                  将模拟处理 <strong>{selectedItems.length}</strong> 项，预计可释放{" "}
+                  <strong className="font-mono">
+                    {formatBytes(selectedBytes)}
+                  </strong>
+                  ，不会实际删除。
+                </>
+              ) : (
+                <>
+                  将{toRecycleBin ? "移到回收站" : "永久删除"}{" "}
+                  <strong>{selectedItems.length}</strong> 项，预计释放{" "}
+                  <strong className="font-mono">
+                    {formatBytes(selectedBytes)}
+                  </strong>
+                  。缓存类目录通常可安全重建；高风险项请确认无程序占用。
+                </>
+              )}
             </p>
+            <div className="mt-4 space-y-2">
+              <label className="flex items-center gap-2 text-sm text-[var(--color-ink)]/75">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(e) => setDryRun(e.target.checked)}
+                  className="accent-[var(--color-sea)]"
+                />
+                仅模拟（不删除）
+              </label>
+              <label className="flex items-center gap-2 text-sm text-[var(--color-ink)]/75">
+                <input
+                  type="checkbox"
+                  checked={toRecycleBin}
+                  disabled={dryRun}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setToRecycleBin(v);
+                    void persistConfig({ toRecycleBinByDefault: v });
+                  }}
+                  className="accent-[var(--color-sea)] disabled:opacity-40"
+                />
+                移到回收站而非永久删除
+              </label>
+            </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -1012,7 +1228,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 onClick={() => void runClean()}
                 className="btn-press rounded-lg px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
-                确认删除
+                {dryRun ? "开始模拟" : "确认删除"}
               </button>
             </div>
           </div>

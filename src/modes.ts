@@ -1,6 +1,14 @@
 import type { Category } from "./types";
 
-export type CleanMode = "safe" | "dev" | "system" | "large" | "docker";
+export type CleanMode =
+  | "safe"
+  | "dev"
+  | "system"
+  | "large"
+  | "docker"
+  | "dupes"
+  | "stale"
+  | "installers";
 
 export interface ModeMeta {
   id: CleanMode;
@@ -11,6 +19,8 @@ export interface ModeMeta {
   needsThreshold: boolean;
   needsStaleDays: boolean;
   safeOnly: boolean;
+  /** Which threshold presets / default to use when needsThreshold */
+  thresholdKind?: "large" | "dupes" | "installers";
   emptyHint: string;
   rootsHint?: string;
 }
@@ -20,6 +30,9 @@ export const MODE_ORDER: CleanMode[] = [
   "dev",
   "system",
   "large",
+  "dupes",
+  "stale",
+  "installers",
   "docker",
 ];
 
@@ -86,7 +99,44 @@ export const MODES: Record<CleanMode, ModeMeta> = {
     needsThreshold: true,
     needsStaleDays: false,
     safeOnly: false,
+    thresholdKind: "large",
     emptyHint: "添加扫描根目录并设定阈值后点击「开始扫描」",
+  },
+  dupes: {
+    id: "dupes",
+    title: "重复文件",
+    subtitle: "按大小与内容哈希查找重复文件，默认只勾选副本",
+    categories: ["duplicate_files"],
+    needsRoots: true,
+    needsThreshold: true,
+    needsStaleDays: false,
+    safeOnly: false,
+    thresholdKind: "dupes",
+    emptyHint: "添加扫描根目录并设定最小文件大小后点击「开始扫描」",
+  },
+  stale: {
+    id: "stale",
+    title: "闲置文件",
+    subtitle: "扫描根目录与下载文件夹中超过 N 天未修改的文件",
+    categories: ["stale_files"],
+    needsRoots: true,
+    needsThreshold: false,
+    needsStaleDays: true,
+    safeOnly: false,
+    emptyHint: "添加扫描根目录并设定闲置天数后点击「开始扫描」",
+    rootsHint: "会自动包含系统「下载」文件夹",
+  },
+  installers: {
+    id: "installers",
+    title: "安装包 / 镜像",
+    subtitle: "查找安装包、ISO 镜像与 Android SDK 残留",
+    categories: ["installers"],
+    needsRoots: true,
+    needsThreshold: true,
+    needsStaleDays: false,
+    safeOnly: false,
+    thresholdKind: "installers",
+    emptyHint: "添加扫描根目录并设定最小体积后点击「开始扫描」",
   },
   docker: {
     id: "docker",
