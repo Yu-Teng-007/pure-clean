@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --color-ink: #0f1c1a;
+  --color-mist: #e8f2ef;
+  --color-foam: #f4faf8;
+  --color-sea: #1a6b5c;
+  --color-sea-bright: #2a9d86;
+  --color-sand: #c5d4cf;
+  --color-warn: #b45309;
+  --color-danger: #b91c1c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background:
+    radial-gradient(ellipse 120% 80% at 10% -20%, #c8ebe3 0%, transparent 55%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, #d4e4f0 0%, transparent 50%),
+    linear-gradient(165deg, #f4faf8 0%, #e6efec 45%, #dfeae6 100%);
+  background-attachment: fixed;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s ease-out both;
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
