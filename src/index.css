@@ -299,11 +299,135 @@ body {
     background-color 160ms ease,
     opacity 160ms ease,
     border-color 160ms ease,
-    color 160ms ease;
+    color 160ms ease,
+    box-shadow 180ms ease;
 }
 
 .btn-press:active:not(:disabled) {
   transform: scale(0.97);
+}
+
+/* ——— home shell ——— */
+.home-shell {
+  --home-radius: 1rem;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+@media (min-width: 860px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1.35fr) minmax(220px, 0.78fr);
+    align-items: start;
+  }
+
+  .home-aside {
+    position: sticky;
+    top: 0.5rem;
+  }
+}
+
+.home-protect {
+  border-radius: var(--home-radius);
+  border: 1px solid color-mix(in srgb, var(--color-sand) 75%, transparent);
+  background: color-mix(in srgb, white 55%, transparent);
+  padding: 0.875rem 1rem;
+}
+
+.home-input {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.home-input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-sea-bright) 22%, transparent);
+}
+
+.home-featured {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse 90% 80% at 100% 0%, #3fb89a 0%, transparent 55%),
+    linear-gradient(145deg, #165a4e 0%, var(--color-sea) 48%, #1f7d6c 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 14px 36px color-mix(in srgb, var(--color-sea) 22%, transparent);
+}
+
+.home-featured::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 12% 18%, rgb(255 255 255 / 0.16), transparent 42%);
+  pointer-events: none;
+}
+
+.home-featured:hover {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    0 18px 40px color-mix(in srgb, var(--color-sea) 28%, transparent);
+}
+
+.home-featured__icon {
+  background: rgb(255 255 255 / 0.14);
+  color: white;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2);
+}
+
+.home-mode {
+  border: 1px solid color-mix(in srgb, var(--color-sand) 70%, transparent);
+  background: color-mix(in srgb, white 48%, transparent);
+  transition:
+    transform 140ms var(--ease-out),
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease;
+}
+
+.home-mode:hover {
+  background: color-mix(in srgb, white 78%, transparent);
+  border-color: color-mix(in srgb, var(--color-sea) 28%, var(--color-sand));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--color-ink) 5%, transparent);
+}
+
+.home-mode__icon {
+  background: color-mix(in srgb, var(--color-sea) 9%, white);
+  color: var(--color-sea);
+  border: 1px solid color-mix(in srgb, var(--color-sea) 12%, transparent);
+}
+
+.home-panel {
+  border: 1px solid color-mix(in srgb, var(--color-sand) 70%, transparent);
+  background: color-mix(in srgb, white 50%, transparent);
+}
+
+.home-disk-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-sand) 55%, white);
+}
+
+.home-disk-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--color-sea) 0%,
+    var(--color-sea-bright) 100%
+  );
+  transition: width 0.45s var(--ease-out);
+}
+
+.home-disk-fill--tight {
+  background: linear-gradient(90deg, #b45309 0%, #d97706 100%);
 }
 
 .progress-track {
@@ -442,6 +566,7 @@ body {
   .clean-orb__ring,
   .clean-orb__core,
   .success-check__mark,
+  .home-disk-fill,
   .btn-press {
     animation: none !important;
     transition: none !important;
