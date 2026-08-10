@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ArrowLeft,
   ArrowsClockwise,
   RocketLaunch,
 } from "@phosphor-icons/react";
 import { impactLabel, locationLabel } from "./appView";
+import WorkspaceHeader from "./WorkspaceHeader";
 import type { StartupImpact, StartupItem, StartupLocation } from "./types";
 
 interface StartupWorkspaceProps {
@@ -96,47 +96,31 @@ export default function StartupWorkspace({ onBack }: StartupWorkspaceProps) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <header className="px-6 pt-4 pb-3 flex items-start justify-between gap-3 shrink-0">
-        <div className="min-w-0 flex items-start gap-3">
+      <WorkspaceHeader
+        title="开机项管理"
+        subtitle={
+          <>
+            注册表 Run 与 Startup 文件夹 · 已启用 {enabledCount} / {items.length}
+          </>
+        }
+        icon={<RocketLaunch size={18} weight="duotone" />}
+        onBack={onBack}
+        actions={
           <button
             type="button"
-            onClick={onBack}
-            className="btn-press mt-0.5 inline-flex size-9 items-center justify-center rounded-xl border border-[var(--color-sand)]/80 bg-white/55 text-[var(--color-ink)]/70 hover:bg-white/80"
-            aria-label="返回"
+            onClick={() => void refresh()}
+            disabled={loading || busyId !== null}
+            className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 disabled:opacity-50"
           >
-            <ArrowLeft size={16} weight="bold" />
+            <ArrowsClockwise
+              size={14}
+              weight="bold"
+              className={loading ? "animate-spin" : ""}
+            />
+            刷新
           </button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2.5">
-              <span className="ws-mode-icon flex size-9 items-center justify-center rounded-xl">
-                <RocketLaunch size={18} weight="duotone" />
-              </span>
-              <div className="min-w-0">
-                <h1 className="text-[1.15rem] font-semibold tracking-tight text-[var(--color-ink)]">
-                  开机项管理
-                </h1>
-                <p className="mt-0.5 text-[12px] text-[var(--color-ink)]/55">
-                  注册表 Run 与 Startup 文件夹 · 已启用 {enabledCount} /{" "}
-                  {items.length}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading || busyId !== null}
-          className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 disabled:opacity-50"
-        >
-          <ArrowsClockwise
-            size={14}
-            weight="bold"
-            className={loading ? "animate-spin" : ""}
-          />
-          刷新
-        </button>
-      </header>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {error && (

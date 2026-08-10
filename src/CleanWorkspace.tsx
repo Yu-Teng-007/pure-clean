@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeft,
   FolderSimplePlus,
   MagnifyingGlass,
   ShieldWarning,
@@ -12,6 +11,7 @@ import {
 import { MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
+import WorkspaceHeader from "./WorkspaceHeader";
 import {
   AppConfig,
   CATEGORY_ORDER,
@@ -699,30 +699,14 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
 
   return (
     <div className="ws-shell h-full flex flex-col overflow-hidden">
-      <header className="ws-header px-7 pt-5 pb-4 animate-fade-up">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex items-start gap-3">
-            <button
-              type="button"
-              onClick={onBack}
-              disabled={backDisabled}
-              className="btn-press mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-sand)]/80 bg-white/55 text-[var(--color-sea)] hover:bg-white disabled:opacity-40"
-              aria-label="返回首页"
-            >
-              <ArrowLeft size={16} weight="bold" />
-            </button>
-            <span className="ws-mode-icon mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl">
-              <ModeIcon size={22} weight="duotone" />
-            </span>
-            <div className="min-w-0 pt-0.5">
-              <h1 className="text-[1.35rem] font-semibold tracking-[-0.02em] text-[var(--color-ink)] leading-tight text-balance">
-                {meta.title}
-              </h1>
-              <p className="mt-1 max-w-[48ch] text-[13px] leading-relaxed text-[var(--color-ink)]/55">
-                {meta.subtitle}
-              </p>
-            </div>
-          </div>
+      <WorkspaceHeader
+        title={meta.title}
+        subtitle={meta.subtitle}
+        icon={<ModeIcon size={18} weight="duotone" />}
+        onBack={onBack}
+        backDisabled={backDisabled}
+        backAriaLabel="返回首页"
+        actions={
           <button
             type="button"
             onClick={() => setProtectOpen(true)}
@@ -742,8 +726,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               </span>
             )}
           </button>
-        </div>
-      </header>
+        }
+      />
 
       <section
         className="px-7 pb-4 animate-fade-up"

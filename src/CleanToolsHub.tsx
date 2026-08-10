@@ -1,6 +1,7 @@
-import { ArrowLeft, ArrowRight, Broom } from "@phosphor-icons/react";
+import { ArrowRight, Broom } from "@phosphor-icons/react";
 import { MODE_ORDER, MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
+import WorkspaceHeader from "./WorkspaceHeader";
 
 interface CleanToolsHubProps {
   onBack: () => void;
@@ -13,29 +14,12 @@ export default function CleanToolsHub({
 }: CleanToolsHubProps) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <header className="px-6 pt-4 pb-3 flex items-start gap-3 shrink-0">
-        <button
-          type="button"
-          onClick={onBack}
-          className="btn-press mt-0.5 inline-flex size-9 items-center justify-center rounded-xl border border-[var(--color-sand)]/80 bg-white/55 text-[var(--color-ink)]/70 hover:bg-white/80"
-          aria-label="返回"
-        >
-          <ArrowLeft size={16} weight="bold" />
-        </button>
-        <div className="min-w-0 flex items-center gap-2.5">
-          <span className="ws-mode-icon flex size-9 items-center justify-center rounded-xl">
-            <Broom size={18} weight="duotone" />
-          </span>
-          <div className="min-w-0">
-            <h1 className="text-[1.15rem] font-semibold tracking-tight text-[var(--color-ink)]">
-              清理工具
-            </h1>
-            <p className="mt-0.5 text-[12px] text-[var(--color-ink)]/55">
-              按场景扫描并清理缓存、垃圾文件与大体积占用
-            </p>
-          </div>
-        </div>
-      </header>
+      <WorkspaceHeader
+        title="清理工具"
+        subtitle="按场景扫描并清理缓存、垃圾文件与大体积占用"
+        icon={<Broom size={18} weight="duotone" />}
+        onBack={onBack}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         <ul className="home-modes grid grid-cols-1 sm:grid-cols-2 gap-2.5">

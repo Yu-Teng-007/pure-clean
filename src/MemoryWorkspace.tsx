@@ -7,7 +7,6 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ArrowLeft,
   ArrowsClockwise,
   Broom,
   Memory,
@@ -16,6 +15,7 @@ import MemoryCleanModal, {
   type MemoryCleanPhase,
 } from "./MemoryCleanModal";
 import ScrollEdgeFabs from "./ScrollEdgeFabs";
+import WorkspaceHeader from "./WorkspaceHeader";
 import {
   formatBytes,
   type MemoryCleanReport,
@@ -245,31 +245,14 @@ export default function MemoryWorkspace({ onBack }: MemoryWorkspaceProps) {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <header className="ws-header shrink-0 px-7 pt-5 pb-4 animate-fade-up">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex items-start gap-3">
-            <button
-              type="button"
-              onClick={onBack}
-              disabled={modalOpen && phase === "running"}
-              className="btn-press mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-[var(--color-sand)]/80 bg-white/55 text-[var(--color-ink)]/70 hover:bg-white/80 disabled:opacity-50"
-              aria-label="返回"
-            >
-              <ArrowLeft size={16} weight="bold" />
-            </button>
-            <span className="ws-mode-icon mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl">
-              <Memory size={18} weight="duotone" />
-            </span>
-            <div className="min-w-0 pt-0.5">
-              <h1 className="text-[1.15rem] font-semibold tracking-tight text-[var(--color-ink)] leading-tight">
-                内存清理
-              </h1>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-ink)]/55">
-                压缩进程工作集并尝试刷新待机内存
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+      <WorkspaceHeader
+        title="内存清理"
+        subtitle="压缩进程工作集并尝试刷新待机内存"
+        icon={<Memory size={18} weight="duotone" />}
+        onBack={onBack}
+        backDisabled={modalOpen && phase === "running"}
+        actions={
+          <>
             <button
               type="button"
               onClick={() => void refresh()}
@@ -292,9 +275,9 @@ export default function MemoryWorkspace({ onBack }: MemoryWorkspaceProps) {
               <Broom size={14} weight="bold" />
               一键清理
             </button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       <div className="relative flex-1 min-h-0">
         <div
