@@ -16,6 +16,7 @@ import {
 } from "@phosphor-icons/react";
 import type { AppTool } from "./appView";
 import AppIcon from "./AppIcon";
+import HistoryDetailModal from "./HistoryDetailModal";
 import OptimizeModal from "./OptimizeModal";
 import ProtectPathsModal from "./ProtectPathsModal";
 import {
@@ -52,6 +53,11 @@ export default function Home({ onOpenTool }: HomeProps) {
   const [protectLeaving, setProtectLeaving] = useState(false);
   const [optimizeOpen, setOptimizeOpen] = useState(false);
   const [optimizeLeaving, setOptimizeLeaving] = useState(false);
+  const [historyDetail, setHistoryDetail] = useState<HistoryEntry | null>(
+    null,
+  );
+  const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
+  const [historyDetailLeaving, setHistoryDetailLeaving] = useState(false);
 
   const refreshHomeStats = useCallback(async () => {
     try {
@@ -122,6 +128,28 @@ export default function Home({ onOpenTool }: HomeProps) {
       setOptimizeLeaving(false);
     }, MODAL_OUT_MS);
   }, [optimizeLeaving]);
+
+  const openHistoryDetail = useCallback((entry: HistoryEntry) => {
+    setHistoryDetail(entry);
+    setHistoryDetailLeaving(false);
+    setHistoryDetailOpen(true);
+  }, []);
+
+  const closeHistoryDetail = useCallback(() => {
+    if (historyDetailLeaving) return;
+    if (prefersReducedMotion()) {
+      setHistoryDetailOpen(false);
+      setHistoryDetailLeaving(false);
+      setHistoryDetail(null);
+      return;
+    }
+    setHistoryDetailLeaving(true);
+    window.setTimeout(() => {
+      setHistoryDetailOpen(false);
+      setHistoryDetailLeaving(false);
+      setHistoryDetail(null);
+    }, MODAL_OUT_MS);
+  }, [historyDetailLeaving]);
 
   useEffect(() => {
     if (!protectOpen || optimizeOpen) return;
@@ -446,19 +474,25 @@ export default function Home({ onOpenTool }: HomeProps) {
             {history.length > 0 ? (
               <ul className="divide-y divide-[var(--color-sand)]/50">
                 {history.map((h) => (
-                  <li key={h.id} className="py-2.5 first:pt-0 last:pb-0">
-                    <p className="text-[12.5px] font-medium text-[var(--color-ink)]/80">
-                      {h.dryRun ? "模拟释放 " : "释放 "}
-                      <span className="font-mono text-[var(--color-sea)]">
-                        {formatBytes(h.freedBytes)}
-                      </span>
-                    </p>
-                    <p className="mt-0.5 text-[11px] font-mono text-[var(--color-ink)]/42">
-                      {h.timestamp}
-                      {h.failureCount > 0
-                        ? ` · 失败 ${h.failureCount}`
-                        : ` · 成功 ${h.successCount}`}
-                    </p>
+                  <li key={h.id} className="first:pt-0 last:pb-0">
+                    <button
+                      type="button"
+                      onClick={() => openHistoryDetail(h)}
+                      className="btn-press w-full rounded-lg py-2.5 text-left outline-none hover:bg-[var(--color-mist)]/60 focus-visible:ring-2 focus-visible:ring-[var(--color-sea)]/35"
+                    >
+                      <p className="text-[12.5px] font-medium text-[var(--color-ink)]/80">
+                        {h.dryRun ? "模拟释放 " : "释放 "}
+                        <span className="font-mono text-[var(--color-sea)]">
+                          {formatBytes(h.freedBytes)}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-mono text-[var(--color-ink)]/42">
+                        {h.timestamp}
+                        {h.failureCount > 0
+                          ? ` · 失败 ${h.failureCount}`
+                          : ` · 成功 ${h.successCount}`}
+                      </p>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -493,6 +527,13 @@ export default function Home({ onOpenTool }: HomeProps) {
           closeOptimize();
           window.setTimeout(() => onOpenTool("startup"), MODAL_OUT_MS);
         }}
+      />
+
+      <HistoryDetailModal
+        open={historyDetailOpen}
+        leaving={historyDetailLeaving}
+        entry={historyDetail}
+        onClose={closeHistoryDetail}
       />
     </div>
   );
