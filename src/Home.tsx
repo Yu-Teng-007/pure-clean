@@ -30,6 +30,44 @@ interface HomeProps {
   onOpenTool: (tool: AppTool) => void;
 }
 
+const HOME_TOOLS: {
+  id: AppTool;
+  title: string;
+  desc: string;
+  Icon: typeof Broom;
+}[] = [
+  {
+    id: "cleanHub",
+    title: "清理工具",
+    desc: "按场景清理缓存与垃圾，腾出磁盘空间",
+    Icon: Broom,
+  },
+  {
+    id: "diskAnalyzer",
+    title: "磁盘空间分析",
+    desc: "层层下钻，定位空间真正去向",
+    Icon: ChartPie,
+  },
+  {
+    id: "startup",
+    title: "开机项管理",
+    desc: "管理自启程序，减轻开机负担",
+    Icon: RocketLaunch,
+  },
+  {
+    id: "memory",
+    title: "内存清理",
+    desc: "看清占用，一键释放可用内存",
+    Icon: Memory,
+  },
+  {
+    id: "hardware",
+    title: "硬件信息",
+    desc: "一览本机 CPU、内存、显卡与磁盘",
+    Icon: Cpu,
+  },
+];
+
 const MODAL_OUT_MS = 180;
 
 function driveLetter(name: string): string {
@@ -250,141 +288,39 @@ export default function Home({ onOpenTool }: HomeProps) {
             aria-label="工具"
           >
             <ul className="home-modes grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <li style={{ animationDelay: "110ms" }}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("cleanHub")}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
+              {HOME_TOOLS.map(({ id, title, desc, Icon }, index) => (
+                <li
+                  key={id}
+                  className="min-h-0"
+                  style={{ animationDelay: `${110 + index * 14}ms` }}
                 >
-                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <Broom size={17} weight="duotone" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        清理工具
+                  <button
+                    type="button"
+                    onClick={() => onOpenTool(id)}
+                    className="btn-press home-mode group flex h-full w-full items-center gap-3.5 rounded-2xl px-4 py-3.5 text-left"
+                  >
+                    <span className="home-mode__icon flex size-9 shrink-0 items-center justify-center rounded-xl">
+                      <Icon size={18} weight="duotone" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] transition-colors duration-150 group-hover:text-[var(--color-sea)]">
+                          {title}
+                        </span>
+                        <ArrowRight
+                          size={13}
+                          weight="bold"
+                          className="-translate-x-1 text-[var(--color-ink)]/25 opacity-0 transition-[opacity,transform,color] duration-150 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] group-hover:opacity-100"
+                          aria-hidden
+                        />
                       </span>
-                      <ArrowRight
-                        size={13}
-                        weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                        aria-hidden
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      开发、系统、大文件、重复文件等按场景清理
-                    </span>
-                  </span>
-                </button>
-              </li>
-              <li style={{ animationDelay: "124ms" }}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("diskAnalyzer")}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
-                >
-                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <ChartPie size={17} weight="duotone" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        磁盘空间分析
+                      <span className="home-mode__desc mt-1 text-[12px] leading-snug text-[var(--color-ink)]/48">
+                        {desc}
                       </span>
-                      <ArrowRight
-                        size={13}
-                        weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                        aria-hidden
-                      />
                     </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      定位 C 盘 200GB+ 占用去向，AppData 与已装软件一目了然
-                    </span>
-                  </span>
-                </button>
-              </li>
-              <li style={{ animationDelay: "138ms" }}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("startup")}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
-                >
-                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <RocketLaunch size={17} weight="duotone" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        开机项管理
-                      </span>
-                      <ArrowRight
-                        size={13}
-                        weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                        aria-hidden
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      查看并启用/禁用注册表与 Startup 启动项
-                    </span>
-                  </span>
-                </button>
-              </li>
-              <li style={{ animationDelay: "166ms" }}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("memory")}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
-                >
-                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <Memory size={17} weight="duotone" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        内存清理
-                      </span>
-                      <ArrowRight
-                        size={13}
-                        weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                        aria-hidden
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      查看占用、一键压缩工作集并释放可用内存
-                    </span>
-                  </span>
-                </button>
-              </li>
-              <li style={{ animationDelay: "194ms" }}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("hardware")}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
-                >
-                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
-                    <Cpu size={17} weight="duotone" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
-                        硬件信息
-                      </span>
-                      <ArrowRight
-                        size={13}
-                        weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
-                        aria-hidden
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
-                      查看 CPU、内存、显卡、磁盘与网卡等本机概况
-                    </span>
-                  </span>
-                </button>
-              </li>
+                  </button>
+                </li>
+              ))}
             </ul>
           </nav>
         </main>

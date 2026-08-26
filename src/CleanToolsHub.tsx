@@ -35,24 +35,24 @@ export default function CleanToolsHub({
                 <button
                   type="button"
                   onClick={() => onEnterMode(id)}
-                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3.5 text-left"
+                  className="btn-press home-mode group flex h-full w-full items-center gap-3.5 rounded-2xl px-4 py-3.5 text-left"
                 >
-                  <span className="home-mode__icon mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl">
+                  <span className="home-mode__icon flex size-9 shrink-0 items-center justify-center rounded-xl">
                     <ModeIcon size={18} weight="duotone" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
+                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] transition-colors duration-150 group-hover:text-[var(--color-sea)]">
                         {mode.title}
                       </span>
                       <ArrowRight
                         size={13}
                         weight="bold"
-                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
+                        className="-translate-x-1 text-[var(--color-ink)]/25 opacity-0 transition-[opacity,transform,color] duration-150 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] group-hover:opacity-100"
                         aria-hidden
                       />
                     </span>
-                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
+                    <span className="home-mode__desc mt-1 text-[12px] leading-snug text-[var(--color-ink)]/48">
                       {mode.subtitle}
                     </span>
                   </span>
