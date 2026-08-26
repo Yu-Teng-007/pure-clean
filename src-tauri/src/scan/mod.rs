@@ -3,15 +3,17 @@ pub mod size;
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, DEFAULT_DUPE_MIN_BYTES, DEFAULT_MIN_FILE_BYTES, DEFAULT_STALE_DAYS};
 use crate::model::{Category, Risk, ScanItem, ScanProgress, ScanResult};
 use crate::scan::rules::{
-    docker_prune_item, downloads_dir, fixed_dev_paths, fixed_docker_wsl_paths, fixed_system_paths,
-    recycle_bin_item, scan_duplicate_files, scan_fixed_paths, scan_installers, scan_large_files,
-    scan_node_modules, scan_project_tree, scan_stale_files,
+    docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
+    fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_duplicate_files,
+    scan_fixed_paths, scan_installers, scan_large_files, scan_node_modules, scan_project_tree,
+    scan_stale_files,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -43,6 +45,12 @@ fn push_unique(
     items.push(item);
 }
 
+fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
+    cancel
+        .map(|c| c.load(Ordering::Relaxed))
+        .unwrap_or(false)
+}
+
 pub fn run_scan(
     app: &AppHandle,
     roots: &[String],
@@ -52,6 +60,8 @@ pub fn run_scan(
     stale_days: Option<u64>,
     safe_only: bool,
     protected_paths: &[String],
+    emit_events: bool,
+    cancel: Option<&AtomicBool>,
 ) -> ScanResult {
     let enabled: HashSet<Category> = categories
         .unwrap_or_else(Category::all)
@@ -77,15 +87,33 @@ pub fn run_scan(
         }
     }
 
+    // Progress callback: honor cancel + optionally emit (optimize runs silent to avoid UI flood).
+    macro_rules! progress {
+        () => {
+            &mut |p: &str| -> bool {
+                if is_cancelled(cancel) {
+                    return false;
+                }
+                if emit_events {
+                    emit_progress(app, p, items_found, bytes_found);
+                }
+                true
+            }
+        };
+    }
+
     for root in &scan_roots {
+        if is_cancelled(cancel) {
+            break;
+        }
         let path = Path::new(root);
         if !path.is_dir() {
             continue;
         }
-        emit_progress(app, root, items_found, bytes_found);
-        let found = scan_project_tree(path, max_depth, &enabled, &mut |p| {
-            emit_progress(app, p, items_found, bytes_found);
-        });
+        if !progress!()(root) {
+            break;
+        }
+        let found = scan_project_tree(path, max_depth, &enabled, progress!());
         for item in found {
             push_unique(
                 &mut items,
@@ -96,10 +124,12 @@ pub fn run_scan(
             );
         }
 
+        if is_cancelled(cancel) {
+            break;
+        }
+
         if enabled.contains(&Category::LargeFiles) {
-            let large = scan_large_files(path, min_bytes, max_depth, &mut |p| {
-                emit_progress(app, p, items_found, bytes_found);
-            });
+            let large = scan_large_files(path, min_bytes, max_depth, progress!());
             for item in large {
                 push_unique(
                     &mut items,
@@ -111,10 +141,12 @@ pub fn run_scan(
             }
         }
 
+        if is_cancelled(cancel) {
+            break;
+        }
+
         if enabled.contains(&Category::NodeModules) {
-            let modules = scan_node_modules(path, max_depth, stale, &mut |p| {
-                emit_progress(app, p, items_found, bytes_found);
-            });
+            let modules = scan_node_modules(path, max_depth, stale, progress!());
             for item in modules {
                 push_unique(
                     &mut items,
@@ -126,10 +158,12 @@ pub fn run_scan(
             }
         }
 
+        if is_cancelled(cancel) {
+            break;
+        }
+
         if enabled.contains(&Category::DuplicateFiles) {
-            let dupes = scan_duplicate_files(path, dupe_min, max_depth, &mut |p| {
-                emit_progress(app, p, items_found, bytes_found);
-            });
+            let dupes = scan_duplicate_files(path, dupe_min, max_depth, progress!());
             for item in dupes {
                 push_unique(
                     &mut items,
@@ -141,10 +175,12 @@ pub fn run_scan(
             }
         }
 
+        if is_cancelled(cancel) {
+            break;
+        }
+
         if enabled.contains(&Category::StaleFiles) {
-            let stale_items = scan_stale_files(path, stale, max_depth, stale_min, &mut |p| {
-                emit_progress(app, p, items_found, bytes_found);
-            });
+            let stale_items = scan_stale_files(path, stale, max_depth, stale_min, progress!());
             for item in stale_items {
                 push_unique(
                     &mut items,
@@ -156,10 +192,12 @@ pub fn run_scan(
             }
         }
 
+        if is_cancelled(cancel) {
+            break;
+        }
+
         if enabled.contains(&Category::Installers) {
-            let installers = scan_installers(path, max_depth, installer_min, &mut |p| {
-                emit_progress(app, p, items_found, bytes_found);
-            });
+            let installers = scan_installers(path, max_depth, installer_min, progress!());
             for item in installers {
                 push_unique(
                     &mut items,
@@ -172,23 +210,24 @@ pub fn run_scan(
         }
     }
 
-    let mut fixed = fixed_dev_paths();
-    fixed.extend(fixed_system_paths());
-    fixed.extend(fixed_docker_wsl_paths());
-    let fixed_items = scan_fixed_paths(&fixed, &enabled, &mut |p| {
-        emit_progress(app, p, items_found, bytes_found);
-    });
-    for item in fixed_items {
-        push_unique(
-            &mut items,
-            &mut items_found,
-            &mut bytes_found,
-            item,
-            protected_paths,
-        );
+    if !is_cancelled(cancel) {
+        let mut fixed = fixed_dev_paths();
+        fixed.extend(fixed_system_paths());
+        fixed.extend(fixed_app_cache_paths());
+        fixed.extend(fixed_docker_wsl_paths());
+        let fixed_items = scan_fixed_paths(&fixed, &enabled, progress!());
+        for item in fixed_items {
+            push_unique(
+                &mut items,
+                &mut items_found,
+                &mut bytes_found,
+                item,
+                protected_paths,
+            );
+        }
     }
 
-    if enabled.contains(&Category::RecycleBin) {
+    if !is_cancelled(cancel) && enabled.contains(&Category::RecycleBin) {
         let rb = recycle_bin_item();
         push_unique(
             &mut items,
@@ -197,10 +236,10 @@ pub fn run_scan(
             rb,
             protected_paths,
         );
-        emit_progress(app, "回收站", items_found, bytes_found);
+        let _ = progress!()("回收站");
     }
 
-    if enabled.contains(&Category::DockerWsl) {
+    if !is_cancelled(cancel) && enabled.contains(&Category::DockerWsl) {
         let prune = docker_prune_item();
         push_unique(
             &mut items,
@@ -209,21 +248,23 @@ pub fn run_scan(
             prune,
             protected_paths,
         );
-        emit_progress(app, "Docker prune", items_found, bytes_found);
+        let _ = progress!()("Docker prune");
     }
 
-    if safe_only {
+    if !is_cancelled(cancel) && safe_only {
         items.retain(|i| i.risk == Risk::Safe);
         items_found = items.len();
         bytes_found = items.iter().map(|i| i.bytes).sum();
-        emit_progress(app, "仅保留安全项", items_found, bytes_found);
+        let _ = progress!()("仅保留安全项");
     }
 
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes));
 
     let total_bytes: u64 = items.iter().map(|i| i.bytes).sum();
 
-    emit_progress(app, "完成", items_found, total_bytes);
+    if !is_cancelled(cancel) {
+        let _ = progress!()("完成");
+    }
 
     ScanResult {
         items,

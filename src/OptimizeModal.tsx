@@ -113,6 +113,7 @@ export default function OptimizeModal({
   );
   const phaseRef = useRef<Phase>("idle");
   const onFinishedRef = useRef(onFinished);
+  const cancelledRef = useRef(false);
   onFinishedRef.current = onFinished;
   phaseRef.current = phase;
 
@@ -127,6 +128,7 @@ export default function OptimizeModal({
 
   const run = useCallback(async () => {
     if (phaseRef.current === "running") return;
+    cancelledRef.current = false;
     setPhase("running");
     setError(null);
     setReport(null);
@@ -134,12 +136,16 @@ export default function OptimizeModal({
     setProgress({ phase: "scanning", message: "准备开始…" });
     try {
       const result = await invoke<OptimizeReport>("run_smart_optimize");
+      if (cancelledRef.current) return;
       setReport(result);
       setProgress({ phase: "done", message: "体检优化完成" });
       setPhase("done");
       onFinishedRef.current?.();
     } catch (e) {
-      setError(String(e));
+      if (cancelledRef.current) return;
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancelled")) return;
+      setError(msg);
       setPhase("error");
     }
   }, []);
@@ -155,41 +161,43 @@ export default function OptimizeModal({
     }
 
     let unsub: (() => void) | undefined;
-    let cancelled = false;
+    let effectCancelled = false;
 
     (async () => {
       unsub = await listen<OptimizeProgress>("optimize_progress", (e) => {
-        setProgress(e.payload);
+        if (!cancelledRef.current) setProgress(e.payload);
       });
-      if (cancelled) return;
+      if (effectCancelled || cancelledRef.current) return;
       void run();
     })();
 
     return () => {
-      cancelled = true;
+      effectCancelled = true;
       unsub?.();
     };
   }, [open, run]);
+
+  const requestClose = useCallback(() => {
+    const busyNow =
+      phaseRef.current === "running" || phaseRef.current === "idle";
+    if (busyNow) {
+      cancelledRef.current = true;
+      void invoke("cancel_smart_optimize").catch(() => {});
+    }
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     if (!open || leaving) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        if (phaseRef.current === "running" || phaseRef.current === "idle") {
-          return;
-        }
-        onClose();
+        requestClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, leaving, onClose]);
-
-  const requestClose = () => {
-    if (phase === "running" || phase === "idle") return;
-    onClose();
-  };
+  }, [open, leaving, requestClose]);
 
   if (!open) return null;
 
@@ -257,8 +265,7 @@ export default function OptimizeModal({
           <button
             type="button"
             onClick={requestClose}
-            disabled={busy}
-            className="btn-press shrink-0 rounded-lg p-1.5 text-[var(--color-ink)]/45 hover:bg-[var(--color-mist)] hover:text-[var(--color-ink)] disabled:opacity-35 disabled:pointer-events-none"
+            className="btn-press shrink-0 rounded-lg p-1.5 text-[var(--color-ink)]/45 hover:bg-[var(--color-mist)] hover:text-[var(--color-ink)]"
             aria-label="关闭"
           >
             <X size={16} weight="bold" />

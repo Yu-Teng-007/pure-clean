@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Emitter};
 
 use crate::clean;
@@ -12,6 +14,13 @@ use crate::model::{
 };
 use crate::scan;
 use crate::startup::{self, StartupItem};
+
+/// Cooperative cancel flag for in-flight smart optimize.
+static OPTIMIZE_CANCEL: AtomicBool = AtomicBool::new(false);
+
+fn optimize_cancelled() -> bool {
+    OPTIMIZE_CANCEL.load(Ordering::Relaxed)
+}
 
 #[tauri::command]
 pub fn get_default_roots() -> Vec<ScanRoot> {
@@ -71,7 +80,14 @@ pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
         request.stale_days,
         request.safe_only.unwrap_or(false),
         &protected,
+        true,
+        None,
     )
+}
+
+#[tauri::command]
+pub fn cancel_smart_optimize() {
+    OPTIMIZE_CANCEL.store(true, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -223,7 +239,9 @@ fn emit_optimize(app: &AppHandle, phase: OptimizePhase, message: &str) {
 }
 
 #[tauri::command]
-pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
+pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
+    OPTIMIZE_CANCEL.store(false, Ordering::SeqCst);
+
     let cfg = config::load_config();
     let protected = cfg.protected_paths.clone();
     let to_recycle = cfg.to_recycle_bin_by_default;
@@ -248,8 +266,12 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
         Category::OtherDev,
         Category::SystemTemp,
         Category::RecycleBin,
+        Category::BrowserCache,
+        Category::AppCache,
     ];
 
+    // Silent scan: avoid flooding the webview with per-path scan_progress events
+    // (that was freezing the UI while the modal X looked unresponsive).
     let scan_result = scan::run_scan(
         &app,
         &roots,
@@ -259,7 +281,13 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
         None,
         true,
         &protected,
+        false,
+        Some(&OPTIMIZE_CANCEL),
     );
+
+    if optimize_cancelled() {
+        return Err("cancelled".into());
+    }
 
     let targets: Vec<CleanTarget> = scan_result
         .items
@@ -279,6 +307,10 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
         &format!("正在清理 {} 项安全垃圾…", targets.len()),
     );
 
+    if optimize_cancelled() {
+        return Err("cancelled".into());
+    }
+
     let clean_report = if targets.is_empty() {
         CleanReport {
             freed_bytes: 0,
@@ -291,6 +323,10 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
     } else {
         clean::run_clean(&app, &targets, false, to_recycle, &protected)
     };
+
+    if optimize_cancelled() {
+        return Err("cancelled".into());
+    }
 
     let _ = history::append_history(HistoryEntry {
         id: format!(
@@ -311,15 +347,24 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
     });
 
     emit_optimize(&app, OptimizePhase::Startup, "正在优化开机启动项…");
+
+    if optimize_cancelled() {
+        return Err("cancelled".into());
+    }
+
     let (startups_disabled, startups_skipped, failed_pairs) = startup::disable_suggested();
     let startups_failed: Vec<StartupFailure> = failed_pairs
         .into_iter()
         .map(|(name, error)| StartupFailure { name, error })
         .collect();
 
+    if optimize_cancelled() {
+        return Err("cancelled".into());
+    }
+
     emit_optimize(&app, OptimizePhase::Done, "体检优化完成");
 
-    OptimizeReport {
+    Ok(OptimizeReport {
         freed_bytes: clean_report.freed_bytes,
         clean_success: clean_report.success_count,
         clean_failures: clean_report.failures,
@@ -329,5 +374,5 @@ pub fn run_smart_optimize(app: AppHandle) -> OptimizeReport {
         startups_failed,
         dry_run: clean_report.dry_run,
         to_recycle_bin: clean_report.to_recycle_bin,
-    }
+    })
 }

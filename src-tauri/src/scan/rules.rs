@@ -203,7 +203,7 @@ pub fn scan_project_tree(
     root: &Path,
     max_depth: usize,
     enabled: &HashSet<Category>,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     use std::cell::RefCell;
 
@@ -245,8 +245,9 @@ pub fn scan_project_tree(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
-
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if !entry.file_type().is_dir() {
             continue;
         }
@@ -278,7 +279,7 @@ pub fn scan_large_files(
     root: &Path,
     min_bytes: u64,
     max_depth: usize,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     let mut items = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -307,8 +308,9 @@ pub fn scan_large_files(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
-
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -352,7 +354,7 @@ pub struct FixedPath {
 }
 
 fn push_ide_cache_dirs(paths: &mut Vec<FixedPath>, base: PathBuf) {
-    for name in ["Cache", "CachedData", "Code Cache", "GPUCache", "logs"] {
+    for name in ["Cache", "CachedData", "Code Cache", "GPUCache", "logs", "CachedExtensions", "CachedExtensionVSIXs"] {
         paths.push(FixedPath {
             path: base.join(name),
             category: Category::IdeCache,
@@ -362,81 +364,185 @@ fn push_ide_cache_dirs(paths: &mut Vec<FixedPath>, base: PathBuf) {
     }
 }
 
+fn push_safe_cache(
+    paths: &mut Vec<FixedPath>,
+    path: PathBuf,
+    category: Category,
+) {
+    paths.push(FixedPath {
+        path,
+        category,
+        risk: Risk::Safe,
+        selected_by_default: true,
+    });
+}
+
+fn push_caution_cache(
+    paths: &mut Vec<FixedPath>,
+    path: PathBuf,
+    category: Category,
+) {
+    paths.push(FixedPath {
+        path,
+        category,
+        risk: Risk::Caution,
+        selected_by_default: false,
+    });
+}
+
+fn push_dangerous_cache(
+    paths: &mut Vec<FixedPath>,
+    path: PathBuf,
+    category: Category,
+) {
+    paths.push(FixedPath {
+        path,
+        category,
+        risk: Risk::Dangerous,
+        selected_by_default: false,
+    });
+}
+
 pub fn fixed_dev_paths() -> Vec<FixedPath> {
     let mut paths = Vec::new();
 
     if let Some(home) = dirs::home_dir() {
         // Gradle
-        paths.push(FixedPath {
-            path: home.join(".gradle").join("caches"),
-            category: Category::Java,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_safe_cache(
+            &mut paths,
+            home.join(".gradle").join("caches"),
+            Category::Java,
+        );
         // Maven — caution, not selected
-        paths.push(FixedPath {
-            path: home.join(".m2").join("repository"),
-            category: Category::Java,
-            risk: Risk::Caution,
-            selected_by_default: false,
-        });
+        push_caution_cache(
+            &mut paths,
+            home.join(".m2").join("repository"),
+            Category::Java,
+        );
         // JetBrains shared caches (Linux-style layout also appears via JetBrains Toolbox)
-        paths.push(FixedPath {
-            path: home.join(".cache").join("JetBrains"),
-            category: Category::IdeCache,
-            risk: Risk::Caution,
-            selected_by_default: false,
-        });
+        push_caution_cache(
+            &mut paths,
+            home.join(".cache").join("JetBrains"),
+            Category::IdeCache,
+        );
+        // NuGet global packages — can reclaim tens of GB
+        push_caution_cache(
+            &mut paths,
+            home.join(".nuget").join("packages"),
+            Category::PackageManagerCache,
+        );
+        // Bun install cache
+        push_safe_cache(
+            &mut paths,
+            home.join(".bun").join("install").join("cache"),
+            Category::PackageManagerCache,
+        );
+        // Go module cache
+        push_caution_cache(
+            &mut paths,
+            home.join("go").join("pkg").join("mod"),
+            Category::PackageManagerCache,
+        );
+        // Scoop package cache
+        push_safe_cache(
+            &mut paths,
+            home.join("scoop").join("cache"),
+            Category::PackageManagerCache,
+        );
+        // Conda / Miniconda package caches
+        for name in ["anaconda3", "miniconda3", "miniforge3"] {
+            push_caution_cache(
+                &mut paths,
+                home.join(name).join("pkgs"),
+                Category::Python,
+            );
+        }
+        // Cargo registry/git caches — large but rebuildable
+        let cargo = home.join(".cargo");
+        push_caution_cache(
+            &mut paths,
+            cargo.join("registry").join("cache"),
+            Category::RustTauri,
+        );
+        push_caution_cache(
+            &mut paths,
+            cargo.join("git").join("db"),
+            Category::RustTauri,
+        );
     }
 
-    // npm cache
+    // npm cache + Electron IDE caches (Roaming)
     if let Some(roaming) = dirs::config_dir() {
-        // On Windows config_dir is AppData\Roaming
-        paths.push(FixedPath {
-            path: roaming.join("npm-cache"),
-            category: Category::PackageManagerCache,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_safe_cache(
+            &mut paths,
+            roaming.join("npm-cache"),
+            Category::PackageManagerCache,
+        );
 
-        // VS Code / Cursor / VSCodium editor caches
-        push_ide_cache_dirs(&mut paths, roaming.join("Code"));
-        push_ide_cache_dirs(&mut paths, roaming.join("Cursor"));
-        push_ide_cache_dirs(&mut paths, roaming.join("VSCodium"));
+        for editor in ["Code", "Cursor", "VSCodium", "Code - Insiders"] {
+            push_ide_cache_dirs(&mut paths, roaming.join(editor));
+        }
     }
 
     if let Some(local) = dirs::data_local_dir() {
-        paths.push(FixedPath {
-            path: local.join("Yarn").join("Cache"),
-            category: Category::PackageManagerCache,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
-        paths.push(FixedPath {
-            path: local.join("npm-cache"),
-            category: Category::PackageManagerCache,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
-        paths.push(FixedPath {
-            path: local.join("pnpm-cache"),
-            category: Category::PackageManagerCache,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_safe_cache(
+            &mut paths,
+            local.join("Yarn").join("Cache"),
+            Category::PackageManagerCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("npm-cache"),
+            Category::PackageManagerCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("pnpm-cache"),
+            Category::PackageManagerCache,
+        );
         // pnpm store — caution (global)
-        paths.push(FixedPath {
-            path: local.join("pnpm").join("store"),
-            category: Category::PackageManagerCache,
-            risk: Risk::Caution,
-            selected_by_default: false,
-        });
-        paths.push(FixedPath {
-            path: local.join("pip").join("Cache"),
-            category: Category::Python,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_caution_cache(
+            &mut paths,
+            local.join("pnpm").join("store"),
+            Category::PackageManagerCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("pip").join("Cache"),
+            Category::Python,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("uv").join("cache"),
+            Category::Python,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("pypoetry").join("Cache"),
+            Category::Python,
+        );
+        // Go build cache
+        push_safe_cache(
+            &mut paths,
+            local.join("go-build"),
+            Category::PackageManagerCache,
+        );
+        // WinGet temporary download cache (not installed packages)
+        push_safe_cache(
+            &mut paths,
+            local.join("Temp").join("WinGet"),
+            Category::PackageManagerCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("Microsoft").join("WinGet").join("Cache"),
+            Category::PackageManagerCache,
+        );
+
+        // Electron editors also keep caches under Local AppData
+        for editor in ["Code", "Cursor", "VSCodium", "Code - Insiders"] {
+            push_ide_cache_dirs(&mut paths, local.join(editor));
+        }
 
         // JetBrains product caches / logs / tmp under Local AppData
         let jetbrains = local.join("JetBrains");
@@ -448,47 +554,66 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
                         continue;
                     }
                     for name in ["caches", "log", "tmp", "Local History"] {
-                        paths.push(FixedPath {
-                            path: product_path.join(name),
-                            category: Category::IdeCache,
-                            risk: Risk::Caution,
-                            selected_by_default: false,
-                        });
+                        push_caution_cache(
+                            &mut paths,
+                            product_path.join(name),
+                            Category::IdeCache,
+                        );
                     }
                 }
             }
         }
     }
 
-    // Cargo registry/git caches are useful but large — include as caution under Rust
-    if let Some(home) = dirs::home_dir() {
-        let cargo = home.join(".cargo");
-        paths.push(FixedPath {
-            path: cargo.join("registry").join("cache"),
-            category: Category::RustTauri,
-            risk: Risk::Caution,
-            selected_by_default: false,
-        });
-        paths.push(FixedPath {
-            path: cargo.join("git").join("db"),
-            category: Category::RustTauri,
-            risk: Risk::Caution,
-            selected_by_default: false,
-        });
-    }
+    // Chocolatey download cache only (never `lib` — that holds installed packages)
+    push_safe_cache(
+        &mut paths,
+        PathBuf::from(r"C:\ProgramData\chocolatey\cache"),
+        Category::PackageManagerCache,
+    );
 
     paths
 }
 
+/// Chromium-family: scan Default / Profile N / Guest / System profiles + shared shader caches.
 fn push_chromium_profile_caches(paths: &mut Vec<FixedPath>, user_data: PathBuf) {
-    let default = user_data.join("Default");
-    for name in ["Cache", "Code Cache", "GPUCache"] {
-        paths.push(FixedPath {
-            path: default.join(name),
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
+    // Shared GPU / shader caches at User Data root
+    for name in ["GrShaderCache", "ShaderCache", "GraphiteDawnCache", "Component Crx Cache"] {
+        push_safe_cache(paths, user_data.join(name), Category::BrowserCache);
+    }
+
+    let Ok(entries) = std::fs::read_dir(&user_data) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_profile = name == "Default"
+            || name == "Guest Profile"
+            || name == "System Profile"
+            || name.starts_with("Profile ");
+        if !is_profile {
+            continue;
+        }
+        // Disk / code / GPU caches are safe to clear (pages re-download)
+        for cache_name in ["Cache", "Code Cache", "GPUCache"] {
+            push_safe_cache(paths, path.join(cache_name), Category::BrowserCache);
+        }
+        // Service Worker cache can be large; clearing may log users out of PWAs
+        push_caution_cache(
+            paths,
+            path.join("Service Worker").join("CacheStorage"),
+            Category::BrowserCache,
+        );
+        push_caution_cache(
+            paths,
+            path.join("Service Worker").join("ScriptCache"),
+            Category::BrowserCache,
+        );
     }
 }
 
@@ -501,18 +626,16 @@ fn push_firefox_profile_caches(paths: &mut Vec<FixedPath>, profiles_root: PathBu
         if !path.is_dir() {
             continue;
         }
-        paths.push(FixedPath {
-            path: path.join("cache2"),
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
-        paths.push(FixedPath {
-            path: path.join("startupCache"),
-            category: Category::BrowserCache,
-            risk: Risk::Dangerous,
-            selected_by_default: false,
-        });
+        push_safe_cache(paths, path.join("cache2"), Category::BrowserCache);
+        push_safe_cache(paths, path.join("startupCache"), Category::BrowserCache);
+        push_caution_cache(paths, path.join("offlineCache"), Category::BrowserCache);
+    }
+}
+
+/// Electron-style app caches under Roaming\<App>\{Cache,Code Cache,GPUCache}.
+fn push_electron_app_caches(paths: &mut Vec<FixedPath>, app_dir: PathBuf) {
+    for name in ["Cache", "Code Cache", "GPUCache", "blob_storage"] {
+        push_safe_cache(paths, app_dir.join(name), Category::AppCache);
     }
 }
 
@@ -520,32 +643,28 @@ pub fn fixed_system_paths() -> Vec<FixedPath> {
     let mut paths = Vec::new();
 
     if let Ok(temp) = std::env::var("TEMP") {
-        paths.push(FixedPath {
-            path: PathBuf::from(temp),
-            category: Category::SystemTemp,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_safe_cache(&mut paths, PathBuf::from(temp), Category::SystemTemp);
     }
     if let Ok(tmp) = std::env::var("TMP") {
         let p = PathBuf::from(&tmp);
         if std::env::var("TEMP").ok().as_deref() != Some(tmp.as_str()) {
-            paths.push(FixedPath {
-                path: p,
-                category: Category::SystemTemp,
-                risk: Risk::Safe,
-                selected_by_default: true,
-            });
+            push_safe_cache(&mut paths, p, Category::SystemTemp);
         }
     }
 
+    // System-wide temp (often needs admin for some files)
+    push_safe_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\Temp"),
+        Category::SystemTemp,
+    );
+
     if let Some(local) = dirs::data_local_dir() {
-        paths.push(FixedPath {
-            path: local.join("Temp"),
-            category: Category::SystemTemp,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+        push_safe_cache(
+            &mut paths,
+            local.join("Temp"),
+            Category::SystemTemp,
+        );
 
         // Thumbnail / icon caches (individual db files)
         let explorer = local.join("Microsoft").join("Windows").join("Explorer");
@@ -556,33 +675,56 @@ pub fn fixed_system_paths() -> Vec<FixedPath> {
                     if (name.starts_with("thumbcache") || name.starts_with("iconcache"))
                         && name.ends_with(".db")
                     {
-                        paths.push(FixedPath {
-                            path: entry.path(),
-                            category: Category::SystemTemp,
-                            risk: Risk::Caution,
-                            selected_by_default: false,
-                        });
+                        push_caution_cache(&mut paths, entry.path(), Category::SystemTemp);
                     }
                 }
             }
         }
 
         // Delivery Optimization cache
-        paths.push(FixedPath {
-            path: local
+        push_safe_cache(
+            &mut paths,
+            local
                 .join("Microsoft")
                 .join("Windows")
                 .join("DeliveryOptimization")
                 .join("Cache"),
-            category: Category::SystemTemp,
-            risk: Risk::Safe,
-            selected_by_default: true,
-        });
+            Category::SystemTemp,
+        );
 
-        // Chrome / Edge / Brave
+        // Internet / Edge WebView temporary internet files
+        push_safe_cache(
+            &mut paths,
+            local.join("Microsoft").join("Windows").join("INetCache"),
+            Category::SystemTemp,
+        );
+
+        // DirectX shader cache — rebuilds on next game/app launch
+        push_safe_cache(
+            &mut paths,
+            local.join("D3DSCache"),
+            Category::SystemTemp,
+        );
+
+        // Crash dumps
+        push_safe_cache(
+            &mut paths,
+            local.join("CrashDumps"),
+            Category::SystemTemp,
+        );
+
+        // Chromium-family browsers (all profiles)
         push_chromium_profile_caches(
             &mut paths,
             local.join("Google").join("Chrome").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Google").join("Chrome Beta").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Google").join("Chrome SxS").join("User Data"),
         );
         push_chromium_profile_caches(
             &mut paths,
@@ -590,36 +732,345 @@ pub fn fixed_system_paths() -> Vec<FixedPath> {
         );
         push_chromium_profile_caches(
             &mut paths,
-            local.join("BraveSoftware").join("Brave-Browser").join("User Data"),
+            local.join("Microsoft").join("Edge Beta").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Microsoft").join("Edge SxS").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local
+                .join("BraveSoftware")
+                .join("Brave-Browser")
+                .join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Vivaldi").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local
+                .join("Opera Software")
+                .join("Opera Stable"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Opera Software").join("Opera GX Stable"),
+        );
+        // Domestic Chromium browsers
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("Tencent").join("QQBrowser").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("360Chrome").join("Chrome").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("360ChromeX").join("Chrome").join("User Data"),
+        );
+        push_chromium_profile_caches(
+            &mut paths,
+            local.join("CentBrowser").join("User Data"),
         );
 
         // Firefox
-        push_firefox_profile_caches(&mut paths, local.join("Mozilla").join("Firefox").join("Profiles"));
+        push_firefox_profile_caches(
+            &mut paths,
+            local.join("Mozilla").join("Firefox").join("Profiles"),
+        );
     }
 
     // Prefetch — caution (diagnostics / boot hints)
-    paths.push(FixedPath {
-        path: PathBuf::from(r"C:\Windows\Prefetch"),
-        category: Category::SystemTemp,
-        risk: Risk::Caution,
-        selected_by_default: false,
-    });
+    push_caution_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\Prefetch"),
+        Category::SystemTemp,
+    );
 
     // Windows Update download cache — often needs admin
-    paths.push(FixedPath {
-        path: PathBuf::from(r"C:\Windows\SoftwareDistribution\Download"),
-        category: Category::SystemTemp,
-        risk: Risk::Dangerous,
-        selected_by_default: false,
-    });
+    push_dangerous_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\SoftwareDistribution\Download"),
+        Category::SystemTemp,
+    );
 
-    // Previous Windows installation leftover
-    paths.push(FixedPath {
-        path: PathBuf::from(r"C:\Windows.old"),
-        category: Category::SystemTemp,
-        risk: Risk::Dangerous,
-        selected_by_default: false,
-    });
+    // CBS / DISM logs
+    push_safe_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\Logs\CBS"),
+        Category::SystemTemp,
+    );
+    push_safe_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\Logs\DISM"),
+        Category::SystemTemp,
+    );
+
+    // Memory dump / minidumps
+    push_caution_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\Minidump"),
+        Category::SystemTemp,
+    );
+    push_dangerous_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows\MEMORY.DMP"),
+        Category::SystemTemp,
+    );
+
+    // Windows Error Reporting queue
+    push_safe_cache(
+        &mut paths,
+        PathBuf::from(r"C:\ProgramData\Microsoft\Windows\WER"),
+        Category::SystemTemp,
+    );
+
+    // Upgrade leftovers — often 10–30+ GB
+    push_dangerous_cache(
+        &mut paths,
+        PathBuf::from(r"C:\Windows.old"),
+        Category::SystemTemp,
+    );
+    push_dangerous_cache(
+        &mut paths,
+        PathBuf::from(r"C:\$WINDOWS.~BT"),
+        Category::SystemTemp,
+    );
+    push_dangerous_cache(
+        &mut paths,
+        PathBuf::from(r"C:\$WINDOWS.~WS"),
+        Category::SystemTemp,
+    );
+
+    paths
+}
+
+/// Third-party / Microsoft app caches that commonly eat tens of GB on C:.
+pub fn fixed_app_cache_paths() -> Vec<FixedPath> {
+    let mut paths = Vec::new();
+
+    if let Some(roaming) = dirs::config_dir() {
+        // Discord / Slack / Teams (classic) / Spotify Electron shells
+        for app in ["discord", "DiscordCanary", "DiscordPTB", "slack", "Spotify"] {
+            push_electron_app_caches(&mut paths, roaming.join(app));
+        }
+        push_electron_app_caches(&mut paths, roaming.join("Microsoft").join("Teams"));
+        // Teams also keeps meeting recordings / blobs
+        push_caution_cache(
+            &mut paths,
+            roaming.join("Microsoft").join("Teams").join("Service Worker").join("CacheStorage"),
+            Category::AppCache,
+        );
+
+        // WeChat / QQ (Tencent) roaming caches
+        push_safe_cache(
+            &mut paths,
+            roaming.join("Tencent").join("WeChat").join("radium"),
+            Category::AppCache,
+        );
+        push_caution_cache(
+            &mut paths,
+            roaming.join("Tencent").join("xwechat"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            roaming.join("Tencent").join("QQ").join("Temp"),
+            Category::AppCache,
+        );
+    }
+
+    if let Some(local) = dirs::data_local_dir() {
+        // Office file cache / Telemetry
+        push_caution_cache(
+            &mut paths,
+            local
+                .join("Microsoft")
+                .join("Office")
+                .join("16.0")
+                .join("OfficeFileCache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("Microsoft").join("Office").join("SolutionPackages"),
+            Category::AppCache,
+        );
+
+        // New Microsoft Teams (Store / MSIX)
+        let packages = local.join("Packages");
+        if packages.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&packages) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name.starts_with("MSTeams_") || name.starts_with("MicrosoftTeams_") {
+                        let base = entry.path().join("LocalCache").join("Microsoft").join("MSTeams");
+                        push_safe_cache(
+                            &mut paths,
+                            base.join("EBWebView").join("Cache"),
+                            Category::AppCache,
+                        );
+                        push_safe_cache(
+                            &mut paths,
+                            base.join("EBWebView").join("Code Cache"),
+                            Category::AppCache,
+                        );
+                        push_safe_cache(
+                            &mut paths,
+                            base.join("EBWebView").join("GPUCache"),
+                            Category::AppCache,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Steam HTML / shader caches (not game installs)
+        push_safe_cache(
+            &mut paths,
+            local.join("Steam").join("htmlcache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("Steam").join("shadercache"),
+            Category::AppCache,
+        );
+
+        // NVIDIA / AMD / Intel driver caches
+        push_safe_cache(
+            &mut paths,
+            local.join("NVIDIA").join("DXCache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("NVIDIA").join("GLCache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("AMD").join("DxCache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("AMD").join("GLCache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("Intel").join("ShaderCache"),
+            Category::AppCache,
+        );
+
+        // Spotify local storage (offline may live here — caution)
+        push_caution_cache(
+            &mut paths,
+            local.join("Spotify").join("Storage"),
+            Category::AppCache,
+        );
+        push_caution_cache(
+            &mut paths,
+            local.join("Spotify").join("Data"),
+            Category::AppCache,
+        );
+
+        // Epic Games Launcher cache
+        push_safe_cache(
+            &mut paths,
+            local
+                .join("EpicGamesLauncher")
+                .join("Saved")
+                .join("webcache"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local
+                .join("EpicGamesLauncher")
+                .join("Saved")
+                .join("webcache_4430"),
+            Category::AppCache,
+        );
+
+        // NetEase Cloud Music cache
+        push_caution_cache(
+            &mut paths,
+            local.join("Netease").join("CloudMusic").join("Cache"),
+            Category::AppCache,
+        );
+
+        // Baidu Netdisk cache
+        push_caution_cache(
+            &mut paths,
+            local.join("BaiduNetdisk").join("Cache"),
+            Category::AppCache,
+        );
+
+        // Thunder / Xunlei
+        push_safe_cache(
+            &mut paths,
+            local.join("Thunder Network").join("Thunder").join("Data").join("Temp"),
+            Category::AppCache,
+        );
+
+        // Tencent Meeting / WeCom temp
+        push_safe_cache(
+            &mut paths,
+            local.join("Tencent").join("WeMeet").join("Temp"),
+            Category::AppCache,
+        );
+        push_safe_cache(
+            &mut paths,
+            local.join("Tencent").join("WXWork").join("Cache"),
+            Category::AppCache,
+        );
+    }
+
+    // WeChat file caches under Documents (often the largest consumer)
+    if let Some(home) = dirs::home_dir() {
+        let wechat_files = home.join("Documents").join("WeChat Files");
+        if wechat_files.is_dir() {
+            if let Ok(accounts) = std::fs::read_dir(&wechat_files) {
+                for account in accounts.flatten() {
+                    let account_path = account.path();
+                    if !account_path.is_dir() {
+                        continue;
+                    }
+                    let name = account.file_name().to_string_lossy().into_owned();
+                    // Skip All Users / WMPF related shared dirs carefully
+                    if name.eq_ignore_ascii_case("All Users")
+                        || name.eq_ignore_ascii_case("WMPF")
+                        || name.starts_with('.')
+                    {
+                        continue;
+                    }
+                    let storage = account_path.join("FileStorage");
+                    push_caution_cache(
+                        &mut paths,
+                        storage.join("Cache"),
+                        Category::AppCache,
+                    );
+                    push_caution_cache(
+                        &mut paths,
+                        storage.join("Temp"),
+                        Category::AppCache,
+                    );
+                    // Image / video / file caches — caution (user may want media)
+                    push_caution_cache(
+                        &mut paths,
+                        storage.join("Image").join("Thumb"),
+                        Category::AppCache,
+                    );
+                }
+            }
+        }
+    }
 
     paths
 }
@@ -629,7 +1080,7 @@ pub fn scan_node_modules(
     root: &Path,
     max_depth: usize,
     stale_days: u64,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     use std::time::{Duration, SystemTime};
 
@@ -681,8 +1132,9 @@ pub fn scan_node_modules(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
-
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if !entry.file_type().is_dir() {
             continue;
         }
@@ -867,7 +1319,7 @@ pub fn scan_duplicate_files(
     root: &Path,
     min_bytes: u64,
     max_depth: usize,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     use std::collections::HashMap;
 
@@ -897,7 +1349,9 @@ pub fn scan_duplicate_files(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -912,13 +1366,15 @@ pub fn scan_duplicate_files(
     }
 
     let mut items = Vec::new();
-    for (size, paths) in by_size {
+    'dupe_groups: for (size, paths) in by_size {
         if paths.len() < 2 {
             continue;
         }
         let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for path in paths {
-            on_progress(&path.to_string_lossy());
+            if !on_progress(&path.to_string_lossy()) {
+                break 'dupe_groups;
+            }
             if let Some(hash) = file_content_hash(&path) {
                 by_hash.entry(hash).or_default().push(path);
             }
@@ -968,7 +1424,7 @@ pub fn scan_stale_files(
     stale_days: u64,
     max_depth: usize,
     min_bytes: u64,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     use std::time::{Duration, SystemTime};
 
@@ -1003,7 +1459,9 @@ pub fn scan_stale_files(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -1081,7 +1539,7 @@ pub fn scan_installers(
     root: &Path,
     max_depth: usize,
     min_bytes: u64,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     let mut items = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -1111,8 +1569,9 @@ pub fn scan_installers(
 
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
-        on_progress(&path.to_string_lossy());
-
+        if !on_progress(&path.to_string_lossy()) {
+            break;
+        }
         if entry.file_type().is_dir() {
             let name = entry.file_name().to_string_lossy();
             if matches!(name.as_ref(), "system-images" | "ndk" | "ndk-bundle")
@@ -1176,7 +1635,7 @@ pub fn downloads_dir() -> Option<PathBuf> {
 pub fn scan_fixed_paths(
     fixed: &[FixedPath],
     enabled: &HashSet<Category>,
-    on_progress: &mut dyn FnMut(&str),
+    on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     let mut items = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -1185,7 +1644,9 @@ pub fn scan_fixed_paths(
         if !enabled.contains(&fp.category) {
             continue;
         }
-        on_progress(&fp.path.to_string_lossy());
+        if !on_progress(&fp.path.to_string_lossy()) {
+            break;
+        }
         if !fp.path.exists() {
             continue;
         }

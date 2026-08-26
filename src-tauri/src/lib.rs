@@ -27,6 +27,7 @@ pub fn run() {
             commands::list_startup_items,
             commands::set_startup_enabled,
             commands::run_smart_optimize,
+            commands::cancel_smart_optimize,
             commands::get_hardware_info,
             commands::get_memory_snapshot,
             commands::list_memory_processes,

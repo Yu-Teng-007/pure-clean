@@ -796,7 +796,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               <p className="text-[13px] text-[var(--color-ink)]/60 max-w-[52ch] leading-relaxed">
                 {mode === "docker"
                   ? "将扫描 Docker / WSL 虚拟磁盘，并可执行 docker system prune"
-                  : "将扫描系统临时目录、回收站、浏览器与系统缓存"}
+                  : "将扫描 Temp、回收站、浏览器全配置、应用缓存、升级残留与崩溃转储"}
               </p>
               <button
                 type="button"

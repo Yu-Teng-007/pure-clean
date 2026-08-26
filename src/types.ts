@@ -10,6 +10,7 @@ export type Category =
   | "system_temp"
   | "recycle_bin"
   | "browser_cache"
+  | "app_cache"
   | "large_files"
   | "docker_wsl"
   | "duplicate_files"
@@ -263,6 +264,7 @@ export const CATEGORY_ORDER: Category[] = [
   "system_temp",
   "recycle_bin",
   "browser_cache",
+  "app_cache",
   "large_files",
   "docker_wsl",
   "duplicate_files",
