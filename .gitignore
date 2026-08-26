@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 src-tauri/target
+app-icon-1024.png
 
 # Editor directories and files
 .vscode/*

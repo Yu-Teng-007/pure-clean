@@ -11,9 +11,9 @@ use crate::config::{self, DEFAULT_DUPE_MIN_BYTES, DEFAULT_MIN_FILE_BYTES, DEFAUL
 use crate::model::{Category, Risk, ScanItem, ScanProgress, ScanResult};
 use crate::scan::rules::{
     docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
-    fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_duplicate_files,
-    scan_fixed_paths, scan_installers, scan_large_files, scan_node_modules, scan_project_tree,
-    scan_stale_files,
+    fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_discovered_large_dirs,
+    scan_duplicate_files, scan_fixed_paths, scan_installers, scan_large_files, scan_node_modules,
+    scan_project_tree, scan_stale_files,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -224,6 +224,19 @@ pub fn run_scan(
                 item,
                 protected_paths,
             );
+        }
+
+        if enabled.contains(&Category::AppCache) {
+            let discovered = scan_discovered_large_dirs(&enabled, progress!());
+            for item in discovered {
+                push_unique(
+                    &mut items,
+                    &mut items_found,
+                    &mut bytes_found,
+                    item,
+                    protected_paths,
+                );
+            }
         }
     }
 

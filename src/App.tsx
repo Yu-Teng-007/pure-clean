@@ -5,6 +5,7 @@ import CleanWorkspace from "./CleanWorkspace";
 import HardwareWorkspace from "./HardwareWorkspace";
 import Home from "./Home";
 import MemoryWorkspace from "./MemoryWorkspace";
+import DiskAnalyzerWorkspace from "./DiskAnalyzerWorkspace";
 import StartupWorkspace from "./StartupWorkspace";
 import TitleBar from "./TitleBar";
 import type { CleanMode } from "./modes";
@@ -42,6 +43,8 @@ export default function App() {
           <HardwareWorkspace onBack={goHome} />
         ) : view?.kind === "tool" && view.tool === "memory" ? (
           <MemoryWorkspace onBack={goHome} />
+        ) : view?.kind === "tool" && view.tool === "diskAnalyzer" ? (
+          <DiskAnalyzerWorkspace onBack={goHome} />
         ) : (
           <Home onOpenTool={openTool} />
         )}

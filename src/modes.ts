@@ -84,7 +84,7 @@ export const MODES: Record<CleanMode, ModeMeta> = {
   system: {
     id: "system",
     title: "系统清理",
-    subtitle: "Temp、回收站、浏览器全配置、应用缓存、升级残留与崩溃转储",
+    subtitle: "Temp、回收站、浏览器、AppData 大目录与升级残留",
     categories: ["system_temp", "recycle_bin", "browser_cache", "app_cache"],
     needsRoots: false,
     needsThreshold: false,

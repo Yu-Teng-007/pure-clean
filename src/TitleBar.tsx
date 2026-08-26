@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CopySimple, Minus, Square, X } from "@phosphor-icons/react";
+import AppIcon from "./AppIcon";
 
 export default function TitleBar() {
   const [maximized, setMaximized] = useState(false);
@@ -37,11 +38,12 @@ export default function TitleBar() {
         data-tauri-drag-region
         className="flex-1 min-w-0 flex items-center gap-2 pl-3.5"
       >
+        <AppIcon size={15} className="rounded-[4px] shadow-sm" />
         <span
           data-tauri-drag-region
           className="text-[12.5px] font-semibold tracking-tight text-[var(--color-ink)]/70"
         >
-          Pure Clean
+          净界
         </span>
       </div>
       <div className="flex items-stretch">

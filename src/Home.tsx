@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
   Broom,
+  ChartPie,
   ClockCountdown,
   Cpu,
   HardDrive,
@@ -14,6 +15,7 @@ import {
   ShieldWarning,
 } from "@phosphor-icons/react";
 import type { AppTool } from "./appView";
+import AppIcon from "./AppIcon";
 import OptimizeModal from "./OptimizeModal";
 import ProtectPathsModal from "./ProtectPathsModal";
 import {
@@ -150,9 +152,12 @@ export default function Home({ onOpenTool }: HomeProps) {
       <header className="home-header px-7 pt-6 pb-4 animate-fade-up">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-[1.75rem] font-semibold tracking-[-0.03em] text-[var(--color-ink)] text-balance leading-[1.15]">
-              Pure Clean
-            </h1>
+            <div className="flex items-center gap-3">
+              <AppIcon size={36} className="rounded-[10px] shadow-md ring-1 ring-black/5" />
+              <h1 className="text-[1.75rem] font-semibold tracking-[-0.03em] text-[var(--color-ink)] text-balance leading-[1.15]">
+                净界
+              </h1>
+            </div>
             <p className="mt-1.5 max-w-[36ch] text-[13.5px] leading-relaxed text-[var(--color-ink)]/60">
               智能优化与按场景清理，安全释放磁盘空间。
             </p>
@@ -240,6 +245,33 @@ export default function Home({ onOpenTool }: HomeProps) {
                     </span>
                     <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
                       开发、系统、大文件、重复文件等按场景清理
+                    </span>
+                  </span>
+                </button>
+              </li>
+              <li style={{ animationDelay: "124ms" }}>
+                <button
+                  type="button"
+                  onClick={() => onOpenTool("diskAnalyzer")}
+                  className="btn-press home-mode group w-full h-full flex items-start gap-3 rounded-2xl px-3.5 py-3 text-left"
+                >
+                  <span className="home-mode__icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl">
+                    <ChartPie size={17} weight="duotone" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] group-hover:text-[var(--color-sea)] transition-colors duration-150">
+                        磁盘空间分析
+                      </span>
+                      <ArrowRight
+                        size={13}
+                        weight="bold"
+                        className="text-[var(--color-ink)]/25 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] transition-[opacity,transform,color] duration-150"
+                        aria-hidden
+                      />
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-snug text-[var(--color-ink)]/52 line-clamp-2">
+                      定位 C 盘 200GB+ 占用去向，AppData 与已装软件一目了然
                     </span>
                   </span>
                 </button>

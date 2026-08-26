@@ -78,6 +78,27 @@ export interface DriveInfo {
   freeBytes: number;
 }
 
+export interface DiskUsageEntry {
+  path: string;
+  bytes: number;
+  group: string;
+  groupLabel: string;
+  hint: string | null;
+}
+
+export interface AnalyzeProgress {
+  currentPath: string;
+  entriesFound: number;
+}
+
+export interface AnalyzeResult {
+  drive: string;
+  driveTotalBytes: number;
+  driveUsedBytes: number;
+  driveFreeBytes: number;
+  entries: DiskUsageEntry[];
+}
+
 export interface OsInfo {
   productName: string;
   displayVersion: string;

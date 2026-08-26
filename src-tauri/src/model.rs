@@ -200,6 +200,33 @@ pub struct DriveInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DiskUsageEntry {
+    pub path: String,
+    pub bytes: u64,
+    pub group: String,
+    pub group_label: String,
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyzeProgress {
+    pub current_path: String,
+    pub entries_found: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyzeResult {
+    pub drive: String,
+    pub drive_total_bytes: u64,
+    pub drive_used_bytes: u64,
+    pub drive_free_bytes: u64,
+    pub entries: Vec<DiskUsageEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: String,
     pub timestamp: String,

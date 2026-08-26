@@ -1,8 +1,8 @@
 [package]
 name = "pure-clean"
 version = "0.1.0"
-description = "Developer desktop junk cleaner"
-authors = ["Pure Clean"]
+description = "面向开发者的 Windows 桌面磁盘清理工具"
+authors = ["净界"]
 edition = "2021"
 
 [lib]

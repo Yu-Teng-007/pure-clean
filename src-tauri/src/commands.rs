@@ -9,8 +9,9 @@ use crate::hardware::{self, HardwareInfo};
 use crate::history;
 use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
-    Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry, OptimizePhase,
-    OptimizeProgress, OptimizeReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
+    AnalyzeResult, Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry,
+    OptimizePhase, OptimizeProgress, OptimizeReport, ScanRequest, ScanResult, ScanRoot,
+    StartupFailure,
 };
 use crate::scan;
 use crate::startup::{self, StartupItem};
@@ -186,6 +187,11 @@ pub fn format_bytes(bytes: u64) -> String {
 #[tauri::command]
 pub fn list_drives() -> Vec<DriveInfo> {
     drives::list_drives()
+}
+
+#[tauri::command]
+pub fn analyze_disk_usage(app: AppHandle, drive: Option<String>) -> AnalyzeResult {
+    crate::analyze::analyze_disk_usage(&app, drive)
 }
 
 #[tauri::command]

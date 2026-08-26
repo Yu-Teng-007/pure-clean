@@ -577,8 +577,18 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
 
 /// Chromium-family: scan Default / Profile N / Guest / System profiles + shared shader caches.
 fn push_chromium_profile_caches(paths: &mut Vec<FixedPath>, user_data: PathBuf) {
-    // Shared GPU / shader caches at User Data root
-    for name in ["GrShaderCache", "ShaderCache", "GraphiteDawnCache", "Component Crx Cache"] {
+    // On-device ML / component caches at User Data root (often multi-GB)
+    for name in [
+        "OptGuideOnDeviceModel",
+        "OptGuideOnDeviceClassifierModel",
+        "optimization_guide_model_store",
+        "component_crx_cache",
+        "extensions_crx_cache",
+        "GrShaderCache",
+        "ShaderCache",
+        "GraphiteDawnCache",
+        "Component Crx Cache",
+    ] {
         push_safe_cache(paths, user_data.join(name), Category::BrowserCache);
     }
 
@@ -885,6 +895,68 @@ pub fn fixed_app_cache_paths() -> Vec<FixedPath> {
     }
 
     if let Some(local) = dirs::data_local_dir() {
+        // Android SDK — emulators / images are huge
+        push_caution_cache(
+            &mut paths,
+            local.join("Android").join("Sdk").join(".temp"),
+            Category::AppCache,
+        );
+        push_caution_cache(
+            &mut paths,
+            local.join("Android").join("Sdk").join("system-images"),
+            Category::Installers,
+        );
+        push_caution_cache(
+            &mut paths,
+            local.join("Android").join("Sdk").join("emulator"),
+            Category::AppCache,
+        );
+
+        // Android Studio caches (Google\AndroidStudio*)
+        let google = local.join("Google");
+        if google.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&google) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name.starts_with("AndroidStudio") {
+                        let base = entry.path();
+                        for sub in ["caches", "log", "tmp", "index", "gradle"] {
+                            push_caution_cache(&mut paths, base.join(sub), Category::IdeCache);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Playwright bundled browsers
+        push_caution_cache(
+            &mut paths,
+            local.join("ms-playwright"),
+            Category::OtherDev,
+        );
+
+        // Claude Desktop
+        for claude_dir in ["Claude", "Claude-3p"] {
+            let base = local.join(claude_dir);
+            push_electron_app_caches(&mut paths, base.clone());
+            push_caution_cache(&mut paths, base.join("vm_bundles"), Category::AppCache);
+        }
+
+        // DingTalk / Quark / WPS (common on CN desktops)
+        if local.join("DingTalk_133").is_dir() {
+            push_safe_cache(
+                &mut paths,
+                local.join("DingTalk_133").join("Cache"),
+                Category::AppCache,
+            );
+        }
+        push_electron_app_caches(&mut paths, local.join("Quark"));
+        push_caution_cache(
+            &mut paths,
+            local.join("kingsoft").join("WPS Office").join("cache"),
+            Category::AppCache,
+        );
+
         // Office file cache / Telemetry
         push_caution_cache(
             &mut paths,
@@ -1034,6 +1106,17 @@ pub fn fixed_app_cache_paths() -> Vec<FixedPath> {
 
     // WeChat file caches under Documents (often the largest consumer)
     if let Some(home) = dirs::home_dir() {
+        push_caution_cache(
+            &mut paths,
+            home.join(".android").join("cache"),
+            Category::AppCache,
+        );
+        push_caution_cache(
+            &mut paths,
+            home.join(".android").join("avd"),
+            Category::AppCache,
+        );
+
         let wechat_files = home.join("Documents").join("WeChat Files");
         if wechat_files.is_dir() {
             if let Ok(accounts) = std::fs::read_dir(&wechat_files) {
@@ -1666,6 +1749,113 @@ pub fn scan_fixed_paths(
             fp.selected_by_default,
         ));
     }
+    items
+}
+
+/// Discover large AppData / dot-folders not covered by fixed rules (>= 500 MB).
+const DISCOVERED_MIN_BYTES: u64 = 500 * 1024 * 1024;
+
+pub fn scan_discovered_large_dirs(
+    enabled: &HashSet<Category>,
+    on_progress: &mut dyn FnMut(&str) -> bool,
+) -> Vec<ScanItem> {
+    if !enabled.contains(&Category::AppCache) {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut roots: Vec<(PathBuf, &'static str)> = Vec::new();
+    if let Some(local) = dirs::data_local_dir() {
+        roots.push((local, "AppData\\Local"));
+    }
+    if let Some(roaming) = dirs::config_dir() {
+        roots.push((roaming, "AppData\\Roaming"));
+    }
+
+    for (root, _label) in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if !on_progress(&path.to_string_lossy()) {
+                return items;
+            }
+            let bytes = dir_size_bytes(&path);
+            if bytes < DISCOVERED_MIN_BYTES {
+                continue;
+            }
+            let canonical = path
+                .canonicalize()
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+            items.push(ScanItem {
+                id: item_id(&canonical),
+                category_label: Category::AppCache.label().to_string(),
+                category: Category::AppCache,
+                path: canonical,
+                bytes,
+                risk: Risk::Caution,
+                selected_by_default: false,
+                special: None,
+                group_id: Some("discovered_app_data".into()),
+                is_keeper: None,
+            });
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let Ok(entries) = std::fs::read_dir(&home) else {
+            return items;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if !on_progress(&path.to_string_lossy()) {
+                return items;
+            }
+            let bytes = dir_size_bytes(&path);
+            if bytes < DISCOVERED_MIN_BYTES {
+                continue;
+            }
+            let canonical = path
+                .canonicalize()
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
+            items.push(ScanItem {
+                id: item_id(&canonical),
+                category_label: Category::AppCache.label().to_string(),
+                category: Category::AppCache,
+                path: canonical,
+                bytes,
+                risk: Risk::Caution,
+                selected_by_default: false,
+                special: None,
+                group_id: Some("discovered_dot_dir".into()),
+                is_keeper: None,
+            });
+        }
+    }
+
     items
 }
 

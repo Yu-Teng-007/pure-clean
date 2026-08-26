@@ -1,3 +1,4 @@
+mod analyze;
 mod clean;
 mod commands;
 mod config;
@@ -23,6 +24,7 @@ pub fn run() {
             commands::clean,
             commands::format_bytes,
             commands::list_drives,
+            commands::analyze_disk_usage,
             commands::load_history,
             commands::list_startup_items,
             commands::set_startup_enabled,
@@ -35,5 +37,5 @@ pub fn run() {
             commands::trim_process_working_set,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Pure Clean");
+        .expect("error while running 净界");
 }

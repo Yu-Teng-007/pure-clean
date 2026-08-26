@@ -11,6 +11,7 @@ import {
 import { MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
+import CleanProgressModal, { type DiskCleanPhase } from "./CleanProgressModal";
 import WorkspaceHeader from "./WorkspaceHeader";
 import {
   AppConfig,
@@ -133,19 +134,6 @@ function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined 
   );
 }
 
-function SuccessCheck() {
-  return (
-    <svg
-      className="success-check animate-check-pop"
-      viewBox="0 0 28 28"
-      aria-hidden
-    >
-      <circle className="success-check__circle" cx="14" cy="14" r="12" />
-      <path className="success-check__mark" d="M8.5 14.2l3.4 3.4 7.6-7.6" />
-    </svg>
-  );
-}
-
 interface CleanWorkspaceProps {
   mode: CleanMode;
   onBack: () => void;
@@ -177,8 +165,16 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
   const [listEpoch, setListEpoch] = useState(0);
-  const [freedFlash, setFreedFlash] = useState(0);
 
+  const [cleanModalOpen, setCleanModalOpen] = useState(false);
+  const [cleanModalLeaving, setCleanModalLeaving] = useState(false);
+  const [cleanPhase, setCleanPhase] = useState<DiskCleanPhase>("running");
+  const [cleanStage, setCleanStage] = useState(0);
+  const [cleanProgressPct, setCleanProgressPct] = useState(0);
+  const [lastCleanSelectedCount, setLastCleanSelectedCount] = useState(0);
+  const [lastCleanSelectedBytes, setLastCleanSelectedBytes] = useState(0);
+
+  const cleaningRef = useRef(false);
   const itemsRef = useRef(items);
   const selectedRef = useRef(selected);
   const lastCleanedIdRef = useRef<string | null>(null);
@@ -222,6 +218,47 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const animatedFreed = useAnimatedNumber(cleanProgress?.freedBytes ?? 0);
   const animatedReportFreed = useAnimatedNumber(report?.freedBytes ?? 0, 700);
 
+  // 清理弹窗：阶段 + 平滑进度（与内存清理一致，并与后端真实进度取较大值）
+  useEffect(() => {
+    if (!cleanModalOpen || cleanPhase !== "running") return;
+
+    if (prefersReducedMotion()) {
+      setCleanProgressPct(70);
+      return;
+    }
+
+    let stage = 0;
+    let simulated = 8;
+
+    const stageTimer = window.setInterval(() => {
+      stage = Math.min(2, stage + 1);
+      setCleanStage(stage);
+    }, 480);
+
+    const progressTimer = window.setInterval(() => {
+      simulated = Math.min(92, simulated + 2 + Math.random() * 4);
+      setCleanProgressPct((prev) => {
+        const real =
+          cleanProgress && cleanProgress.total > 0
+            ? (cleanProgress.done / cleanProgress.total) * 100
+            : 0;
+        return Math.min(92, Math.max(prev, simulated, real));
+      });
+    }, 160);
+
+    return () => {
+      window.clearInterval(stageTimer);
+      window.clearInterval(progressTimer);
+    };
+  }, [cleanModalOpen, cleanPhase, cleanProgress?.done, cleanProgress?.total]);
+
+  useEffect(() => {
+    if (cleanPhase !== "running" || !cleanProgress?.total) return;
+    const real = (cleanProgress.done / cleanProgress.total) * 100;
+    if (real >= 25) setCleanStage((s) => Math.max(s, 1));
+    if (real >= 55) setCleanStage((s) => Math.max(s, 2));
+  }, [cleanPhase, cleanProgress?.done, cleanProgress?.total]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -262,8 +299,6 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           lastCleanedIdRef.current = match.id;
           setActiveCleanId(match.id);
         }
-
-        setFreedFlash((n) => n + 1);
       });
       unsubs = [u1, u2];
     })();
@@ -500,119 +535,159 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
     }, MODAL_OUT_MS);
   };
 
-  const runClean = async () => {
-    closeConfirm(async () => {
-      setPhase("cleaning");
-      setReport(null);
+  const closeCleanModal = useCallback(() => {
+    if (cleaningRef.current || cleanModalLeaving) return;
+    if (cleanPhase === "running") return;
+    if (prefersReducedMotion()) {
+      setCleanModalOpen(false);
+      setCleanModalLeaving(false);
+      if (cleanPhase === "done") {
+        setPhase("ready");
+        setReport(null);
+      }
+      return;
+    }
+    setCleanModalLeaving(true);
+    window.setTimeout(() => {
+      setCleanModalOpen(false);
+      setCleanModalLeaving(false);
+      if (cleanPhase === "done") {
+        setPhase("ready");
+        setReport(null);
+      }
+    }, MODAL_OUT_MS);
+  }, [cleanModalLeaving, cleanPhase]);
+
+  const executeClean = async () => {
+    if (cleaningRef.current) return;
+    cleaningRef.current = true;
+
+    setCleanModalOpen(true);
+    setCleanModalLeaving(false);
+    setCleanPhase("running");
+    setCleanStage(0);
+    setCleanProgressPct(8);
+    setPhase("cleaning");
+    setReport(null);
+    setError(null);
+    clearExitTimers();
+    setExitingIds(new Set());
+    setGoneIds(new Set());
+    exitingIdsRef.current = new Set();
+    goneIdsRef.current = new Set();
+    setActiveCleanId(null);
+    lastCleanedIdRef.current = null;
+    const selectedNow = itemsRef.current.filter((i) =>
+      selectedRef.current.has(i.id),
+    );
+    setLastCleanSelectedCount(selectedNow.length);
+    setLastCleanSelectedBytes(selectedNow.reduce((s, i) => s + i.bytes, 0));
+    setCleanProgress({
+      currentPath: "开始清理…",
+      done: 0,
+      total: selectedNow.length,
+      freedBytes: 0,
+    });
+    try {
+      const result = await invoke<CleanReport>("clean", {
+        request: {
+          targets: selectedNow.map((i) => ({
+            path: i.path,
+            category: i.category,
+            bytes: i.bytes,
+            special: i.special,
+          })),
+          dryRun: false,
+          toRecycleBin: false,
+          protectedPaths,
+        },
+      });
+
+      const failedPaths = new Set(result.failures.map((f) => f.path));
+      const successIds = selectedNow
+        .filter((i) => {
+          if (i.special === "recycle_bin") {
+            return !result.failures.some((f) => f.path === "回收站");
+          }
+          if (i.special === "docker_prune") {
+            return !result.failures.some(
+              (f) =>
+                f.path === "Docker system prune" ||
+                f.path.toLowerCase().includes("docker"),
+            );
+          }
+          return !failedPaths.has(i.path);
+        })
+        .map((i) => i.id);
+
+      setActiveCleanId(null);
+      const pendingExit = successIds.filter(
+        (id) => !goneIdsRef.current.has(id),
+      );
+      for (const id of pendingExit) markExiting(id);
+      if (pendingExit.length && !prefersReducedMotion()) {
+        await new Promise((r) => setTimeout(r, EXIT_MS));
+      }
+
+      setItems((prev) =>
+        prev.filter((i) => {
+          if (!selectedRef.current.has(i.id)) return true;
+          if (i.special === "recycle_bin") {
+            return result.failures.some((f) => f.path === "回收站");
+          }
+          if (i.special === "docker_prune") {
+            return result.failures.some(
+              (f) =>
+                f.path === "Docker system prune" ||
+                f.path.toLowerCase().includes("docker"),
+            );
+          }
+          return failedPaths.has(i.path);
+        }),
+      );
       clearExitTimers();
       setExitingIds(new Set());
       setGoneIds(new Set());
       exitingIdsRef.current = new Set();
       goneIdsRef.current = new Set();
-      setActiveCleanId(null);
+      setSelected(new Set());
       lastCleanedIdRef.current = null;
-      const selectedNow = itemsRef.current.filter((i) =>
-        selectedRef.current.has(i.id),
-      );
-      setCleanProgress({
-        currentPath: "开始清理…",
-        done: 0,
-        total: selectedNow.length,
-        freedBytes: 0,
-      });
-      try {
-        const result = await invoke<CleanReport>("clean", {
-          request: {
-            targets: selectedNow.map((i) => ({
-              path: i.path,
-              category: i.category,
-              bytes: i.bytes,
-              special: i.special,
-            })),
-            dryRun: false,
-            toRecycleBin: false,
-            protectedPaths,
-          },
-        });
+      setCleanProgressPct(100);
+      setCleanStage(3);
+      setReport(result);
+      setCleanPhase("done");
+      setPhase("done");
+    } catch (e) {
+      setError(String(e));
+      setCleanPhase("error");
+      setPhase("ready");
+      setActiveCleanId(null);
+      clearExitTimers();
+      setExitingIds(new Set());
+      setGoneIds(new Set());
+      exitingIdsRef.current = new Set();
+      goneIdsRef.current = new Set();
+    } finally {
+      cleaningRef.current = false;
+    }
+  };
 
-        const failedPaths = new Set(result.failures.map((f) => f.path));
-        const successIds = selectedNow
-          .filter((i) => {
-            if (i.special === "recycle_bin") {
-              return !result.failures.some((f) => f.path === "回收站");
-            }
-            if (i.special === "docker_prune") {
-              return !result.failures.some(
-                (f) =>
-                  f.path === "Docker system prune" ||
-                  f.path.toLowerCase().includes("docker"),
-              );
-            }
-            return !failedPaths.has(i.path);
-          })
-          .map((i) => i.id);
-
-        setActiveCleanId(null);
-        const pendingExit = successIds.filter(
-          (id) => !goneIdsRef.current.has(id),
-        );
-        for (const id of pendingExit) markExiting(id);
-        if (pendingExit.length && !prefersReducedMotion()) {
-          await new Promise((r) => setTimeout(r, EXIT_MS));
-        }
-
-        setItems((prev) =>
-          prev.filter((i) => {
-            if (!selectedRef.current.has(i.id)) return true;
-            if (i.special === "recycle_bin") {
-              return result.failures.some((f) => f.path === "回收站");
-            }
-            if (i.special === "docker_prune") {
-              return result.failures.some(
-                (f) =>
-                  f.path === "Docker system prune" ||
-                  f.path.toLowerCase().includes("docker"),
-              );
-            }
-            return failedPaths.has(i.path);
-          }),
-        );
-        clearExitTimers();
-        setExitingIds(new Set());
-        setGoneIds(new Set());
-        exitingIdsRef.current = new Set();
-        goneIdsRef.current = new Set();
-        setSelected(new Set());
-        lastCleanedIdRef.current = null;
-        setReport(result);
-        setPhase("done");
-      } catch (e) {
-        setError(String(e));
-        setPhase("ready");
-        setActiveCleanId(null);
-        clearExitTimers();
-        setExitingIds(new Set());
-        setGoneIds(new Set());
-        exitingIdsRef.current = new Set();
-        goneIdsRef.current = new Set();
-      }
+  const runClean = async () => {
+    closeConfirm(() => {
+      void executeClean();
     });
   };
 
-  const cleanPct =
-    cleanProgress && cleanProgress.total
-      ? Math.min(100, (cleanProgress.done / cleanProgress.total) * 100)
-      : 0;
-
   let rowIndex = 0;
-  const backDisabled = phase === "cleaning";
+  const backDisabled =
+    phase === "cleaning" || (cleanModalOpen && cleanPhase === "running");
   const presets = thresholdPresets(mode);
 
   const ModeIcon = MODE_ICONS[mode];
   const showFooter =
-    phase === "cleaning" ||
-    ((phase === "ready" || phase === "done") &&
-      items.some((i) => !goneIds.has(i.id)));
+    !cleanModalOpen &&
+    (phase === "ready" || phase === "done") &&
+    items.some((i) => !goneIds.has(i.id));
 
   const chipClass = (active: boolean) =>
     [
@@ -930,98 +1005,6 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           </div>
         )}
 
-        {phase === "done" && report && (
-          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/25 bg-[var(--color-sea)]/8 px-5 py-4 animate-fade-up animate-success-glow">
-            <div className="flex items-start gap-3">
-              <SuccessCheck />
-              <div className="min-w-0 flex-1">
-                <p className="text-lg font-semibold text-[var(--color-sea)] tabular-nums tracking-tight">
-                  {report.dryRun
-                    ? "模拟释放 "
-                    : report.toRecycleBin
-                      ? "已移入回收站 "
-                      : "已释放 "}
-                  {formatBytes(animatedReportFreed)}
-                </p>
-                <p className="text-[13px] text-[var(--color-ink)]/60 mt-1">
-                  成功 {report.successCount} 项
-                  {report.failures.length > 0 &&
-                    ` · 失败 ${report.failures.length} 项`}
-                  {report.dryRun && " · 未实际删除"}
-                </p>
-                {report.byCategory?.length > 0 && (
-                  <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
-                    {report.byCategory.map((c) => (
-                      <li
-                        key={c.category}
-                        className="rounded-xl bg-white/50 px-3 py-2 text-xs text-[var(--color-ink)]/65"
-                      >
-                        <span className="font-medium text-[var(--color-ink)]/80">
-                          {c.label}
-                        </span>
-                        <span className="ml-2 font-mono">
-                          {c.count} 项 · {formatBytes(c.freedBytes)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {report.failures.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {report.failures.map((f) => (
-                      <li
-                        key={f.path}
-                        className="text-xs font-mono text-[var(--color-ink)]/55"
-                      >
-                        {f.path}: {f.error}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {phase === "cleaning" && cleanProgress && (
-          <div className="mb-4 rounded-2xl border border-[var(--color-sea)]/20 bg-white/55 px-5 py-4 animate-fade-up">
-            <div className="flex items-center gap-4">
-              <div className="clean-orb" aria-hidden>
-                <div className="clean-orb__ring" />
-                <div className="clean-orb__core" />
-                <div className="clean-orb__dot" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-3 mb-2">
-                  <p className="text-sm font-semibold text-[var(--color-ink)]">
-                    正在清理
-                  </p>
-                  <p
-                    key={freedFlash}
-                    className="text-sm font-mono tabular-nums text-[var(--color-sea)] animate-freed-flash"
-                  >
-                    已释放 {formatBytes(animatedFreed)}
-                  </p>
-                </div>
-                <div className="progress-track h-1.5">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${cleanPct}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate">
-                  <span className="animate-pulse-soft">
-                    {cleanProgress.currentPath}
-                  </span>
-                  <span className="ml-2 tabular-nums text-[var(--color-ink)]/40">
-                    {cleanProgress.done}/{cleanProgress.total}
-                  </span>
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         <div className="space-y-4">
           {grouped.map(([category, catItems]) => {
             const visibleItems = catItems.filter((i) => !goneIds.has(i.id));
@@ -1101,55 +1084,39 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         <footer className="fixed bottom-0 inset-x-0 z-40 border-t border-[var(--color-sand)]/80 bg-[var(--color-foam)]/92 backdrop-blur-md px-7 py-3.5 animate-footer-rise">
           <div className="flex flex-wrap items-center gap-3 justify-between max-w-[1100px]">
             <div className="min-w-0">
-              {phase === "cleaning" && cleanProgress ? (
-                <>
-                  <p className="text-sm font-medium tabular-nums">
-                    清理进度 {cleanProgress.done}/{cleanProgress.total}
-                    <span className="ml-2 font-mono text-[var(--color-sea)]">
-                      {formatBytes(animatedFreed)}
-                    </span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-[var(--color-ink)]/45">
-                    请稍候，正在安全处理所选项目
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-medium">
-                    已选 {selectedItems.length} 项 ·{" "}
-                    <span className="font-mono text-[var(--color-sea)]">
-                      {formatBytes(selectedBytes)}
-                    </span>
-                  </p>
-                  <div className="mt-1 flex gap-3 text-xs">
-                    <button
-                      type="button"
-                      onClick={selectAllSafe}
-                      className="text-[var(--color-sea)] hover:underline"
-                    >
-                      仅选安全项
-                    </button>
-                    <button
-                      type="button"
-                      onClick={clearSelection}
-                      className="text-[var(--color-ink)]/50 hover:underline"
-                    >
-                      清空选择
-                    </button>
-                  </div>
-                </>
-              )}
+              <p className="text-sm font-medium">
+                已选 {selectedItems.length} 项 ·{" "}
+                <span className="font-mono text-[var(--color-sea)]">
+                  {formatBytes(selectedBytes)}
+                </span>
+              </p>
+              <div className="mt-1 flex gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={selectAllSafe}
+                  className="text-[var(--color-sea)] hover:underline"
+                >
+                  仅选安全项
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="text-[var(--color-ink)]/50 hover:underline"
+                >
+                  清空选择
+                </button>
+              </div>
             </div>
             <button
               type="button"
-              disabled={selectedItems.length === 0 || phase === "cleaning"}
+              disabled={selectedItems.length === 0 || cleanModalOpen}
               onClick={() => {
                 setConfirmLeaving(false);
                 setConfirmOpen(true);
               }}
               className="btn-press rounded-xl bg-[var(--color-ink)] text-white px-5 py-2.5 text-sm font-semibold hover:bg-[var(--color-sea)] disabled:opacity-40 min-w-[7.5rem]"
             >
-              {phase === "cleaning" ? "处理中…" : "清理所选"}
+              清理所选
             </button>
           </div>
         </footer>
@@ -1215,6 +1182,24 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         onAdd={() => void addProtected()}
         onRemove={(p) => void removeProtected(p)}
         onClose={closeProtect}
+      />
+
+      <CleanProgressModal
+        open={cleanModalOpen}
+        leaving={cleanModalLeaving}
+        phase={cleanPhase}
+        cleanStage={cleanStage}
+        cleanProgressPct={cleanProgressPct}
+        cleanProgress={cleanProgress}
+        report={report}
+        error={error}
+        animatedFreed={
+          cleanPhase === "done" ? animatedReportFreed : animatedFreed
+        }
+        selectedCount={lastCleanSelectedCount}
+        selectedBytes={lastCleanSelectedBytes}
+        onClose={closeCleanModal}
+        onRetry={() => void executeClean()}
       />
     </div>
   );
