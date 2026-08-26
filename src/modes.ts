@@ -152,3 +152,10 @@ export const MODES: Record<CleanMode, ModeMeta> = {
     emptyHint: "点击「开始扫描」查找 Docker / WSL 占用",
   },
 };
+
+export function cleanModeLabel(mode: string | null | undefined): string {
+  if (!mode) return "手动清理";
+  if (mode === "optimize") return "一键优化";
+  if (mode in MODES) return MODES[mode as CleanMode].title;
+  return mode;
+}

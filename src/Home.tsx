@@ -4,9 +4,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
   Broom,
+  ChartBar,
   ChartPie,
   ClockCountdown,
   Cpu,
+  GearSix,
   HardDrive,
   HardDrives,
   Lightning,
@@ -41,6 +43,12 @@ const HOME_TOOLS: {
     title: "清理工具",
     desc: "按场景清理缓存与垃圾，腾出磁盘空间",
     Icon: Broom,
+  },
+  {
+    id: "devCache",
+    title: "开发缓存看板",
+    desc: "按工具与项目查看可释放占用",
+    Icon: ChartBar,
   },
   {
     id: "diskAnalyzer",
@@ -228,20 +236,30 @@ export default function Home({ onOpenTool }: HomeProps) {
               智能优化与按场景清理，安全释放磁盘空间。
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setProtectOpen(true)}
-            className="btn-press shrink-0 inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
-            aria-haspopup="dialog"
-          >
-            <ShieldWarning size={15} weight="duotone" className="text-[var(--color-warn)]" />
-            保护路径
-            {protectedPaths.length > 0 && (
-              <span className="rounded-md bg-[var(--color-warn)]/12 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warn)]">
-                {protectedPaths.length}
-              </span>
-            )}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenTool("settings")}
+              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
+            >
+              <GearSix size={15} weight="duotone" />
+              设置
+            </button>
+            <button
+              type="button"
+              onClick={() => setProtectOpen(true)}
+              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
+              aria-haspopup="dialog"
+            >
+              <ShieldWarning size={15} weight="duotone" className="text-[var(--color-warn)]" />
+              保护路径
+              {protectedPaths.length > 0 && (
+                <span className="rounded-md bg-[var(--color-warn)]/12 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warn)]">
+                  {protectedPaths.length}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -397,15 +415,24 @@ export default function Home({ onOpenTool }: HomeProps) {
             aria-label="最近清理"
             className="home-panel rounded-2xl p-4 flex-1 min-h-0"
           >
-            <div className="mb-3 flex items-center gap-2">
-              <ClockCountdown
-                size={15}
-                weight="duotone"
-                className="text-[var(--color-sea)]"
-              />
-              <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
-                最近清理
-              </h2>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ClockCountdown
+                  size={15}
+                  weight="duotone"
+                  className="text-[var(--color-sea)]"
+                />
+                <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+                  最近清理
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenTool("history")}
+                className="btn-press text-[11px] font-medium text-[var(--color-sea)] hover:underline"
+              >
+                全部
+              </button>
             </div>
             {history.length > 0 ? (
               <ul className="divide-y divide-[var(--color-sand)]/50">

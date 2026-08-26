@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ClockCountdown, X } from "@phosphor-icons/react";
+import { cleanModeLabel } from "./modes";
 import { formatBytes, type HistoryEntry } from "./types";
 
 interface HistoryDetailModalProps {
@@ -7,12 +8,6 @@ interface HistoryDetailModalProps {
   leaving: boolean;
   entry: HistoryEntry | null;
   onClose: () => void;
-}
-
-function modeLabel(mode: string | null): string {
-  if (mode === "optimize") return "一键优化";
-  if (mode) return mode;
-  return "手动清理";
 }
 
 export default function HistoryDetailModal({
@@ -95,7 +90,7 @@ export default function HistoryDetailModal({
             <div>
               <dt className="text-[11px] text-[var(--color-ink)]/45">方式</dt>
               <dd className="mt-0.5 text-[13px] font-medium text-[var(--color-ink)]">
-                {modeLabel(entry.mode)}
+                {cleanModeLabel(entry.mode)}
               </dd>
             </div>
             <div>

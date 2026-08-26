@@ -1,10 +1,23 @@
-export type AppTool = "startup" | "cleanHub" | "hardware" | "memory" | "diskAnalyzer";
+export type AppTool =
+  | "startup"
+  | "cleanHub"
+  | "hardware"
+  | "memory"
+  | "diskAnalyzer"
+  | "settings"
+  | "history"
+  | "devCache";
 
-export type CleanBack = "home" | "hub";
+export type CleanBack = "home" | "hub" | "disk" | "devCache";
 
 export type AppView =
   | null
-  | { kind: "clean"; mode: import("./modes").CleanMode; back: CleanBack }
+  | {
+      kind: "clean";
+      mode: import("./modes").CleanMode;
+      back: CleanBack;
+      initialRoots?: string[];
+    }
   | { kind: "tool"; tool: AppTool };
 
 export function locationLabel(location: string): string {

@@ -9,15 +9,19 @@ use crate::hardware::{self, HardwareInfo};
 use crate::history;
 use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
-    AnalyzeResult, Category, CleanReport, CleanRequest, CleanTarget, DriveInfo, HistoryEntry,
-    OptimizePhase, OptimizeProgress, OptimizeReport, ScanRequest, ScanResult, ScanRoot,
-    StartupFailure,
+    AnalyzeResult, Category, CleanReport, CleanRequest, CleanTarget, DevCacheDashboard, DriveInfo,
+    HistoryEntry, OptimizePhase, OptimizeProgress, OptimizeReport, ScanRequest, ScanResult,
+    ScanRoot, StartupFailure,
 };
 use crate::scan;
 use crate::startup::{self, StartupItem};
 
 /// Cooperative cancel flag for in-flight smart optimize.
 static OPTIMIZE_CANCEL: AtomicBool = AtomicBool::new(false);
+/// Cooperative cancel for regular scan / clean / dev-cache dashboard.
+static SCAN_CANCEL: AtomicBool = AtomicBool::new(false);
+static CLEAN_CANCEL: AtomicBool = AtomicBool::new(false);
+static DEV_CACHE_CANCEL: AtomicBool = AtomicBool::new(false);
 
 fn optimize_cancelled() -> bool {
     OPTIMIZE_CANCEL.load(Ordering::Relaxed)
@@ -67,6 +71,7 @@ pub fn save_config(config: AppConfig) -> Result<(), String> {
 
 #[tauri::command]
 pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
+    SCAN_CANCEL.store(false, Ordering::SeqCst);
     let max_depth = request.max_depth.unwrap_or(6);
     let cfg = config::load_config();
     let protected = request
@@ -82,7 +87,7 @@ pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
         request.safe_only.unwrap_or(false),
         &protected,
         true,
-        None,
+        Some(&SCAN_CANCEL),
     )
 }
 
@@ -92,7 +97,23 @@ pub fn cancel_smart_optimize() {
 }
 
 #[tauri::command]
+pub fn cancel_scan() {
+    SCAN_CANCEL.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn cancel_clean() {
+    CLEAN_CANCEL.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn cancel_dev_cache_scan() {
+    DEV_CACHE_CANCEL.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
 pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
+    CLEAN_CANCEL.store(false, Ordering::SeqCst);
     let cfg = config::load_config();
     let protected = request
         .protected_paths
@@ -123,7 +144,16 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
         }
     }
 
-    let report = clean::run_clean(&app, &targets, dry_run, to_recycle, &protected);
+    let report = clean::run_clean_with_options(
+        &app,
+        &targets,
+        dry_run,
+        to_recycle,
+        &protected,
+        true,
+        Some(&CLEAN_CANCEL),
+        None,
+    );
 
     let _ = history::append_history(HistoryEntry {
         id: format!(
@@ -134,7 +164,7 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
                 .unwrap_or(0)
         ),
         timestamp: chrono_like_now(),
-        mode: None,
+        mode: request.mode.clone(),
         freed_bytes: report.freed_bytes,
         success_count: report.success_count,
         failure_count: report.failures.len(),
@@ -144,6 +174,34 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
     });
 
     report
+}
+
+#[tauri::command]
+pub fn clear_history() -> Result<(), String> {
+    history::clear_history()
+}
+
+#[tauri::command]
+pub fn scan_dev_caches(app: AppHandle, roots: Option<Vec<String>>) -> DevCacheDashboard {
+    DEV_CACHE_CANCEL.store(false, Ordering::SeqCst);
+    let cfg = config::load_config();
+    let scan_roots = roots.unwrap_or_else(|| cfg.scan_roots.clone());
+    let protected = cfg.protected_paths.clone();
+    let mut last_emit = std::time::Instant::now();
+    scan::dev_cache::build_dashboard(
+        &scan_roots,
+        &protected,
+        Some(&DEV_CACHE_CANCEL),
+        |path| {
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                let _ = app.emit(
+                    "dev_cache_progress",
+                    serde_json::json!({ "currentPath": path }),
+                );
+                last_emit = std::time::Instant::now();
+            }
+        },
+    )
 }
 
 fn chrono_like_now() -> String {

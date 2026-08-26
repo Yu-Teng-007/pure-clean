@@ -204,6 +204,36 @@ export interface HistoryEntry {
   byCategory: CategoryFreed[];
 }
 
+export interface DevCachePathItem {
+  path: string;
+  bytes: number;
+  category: Category;
+  categoryLabel: string;
+  risk: Risk;
+}
+
+export interface DevCacheToolGroup {
+  id: string;
+  label: string;
+  bytes: number;
+  paths: DevCachePathItem[];
+  suggestedMode: string;
+}
+
+export interface ProjectWasteItem {
+  projectPath: string;
+  projectName: string;
+  bytes: number;
+  details: DevCachePathItem[];
+}
+
+export interface DevCacheDashboard {
+  toolGroups: DevCacheToolGroup[];
+  projects: ProjectWasteItem[];
+  totalToolBytes: number;
+  totalProjectBytes: number;
+}
+
 export type StartupLocation =
   | "registry_hkcu"
   | "registry_hklm"

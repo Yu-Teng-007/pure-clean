@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
+  ArrowRight,
   ChartPie,
   HardDrive,
   Info,
@@ -10,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import WorkspaceHeader from "./WorkspaceHeader";
 import Select from "./Select";
+import type { CleanMode } from "./modes";
 import {
   AnalyzeProgress,
   AnalyzeResult,
@@ -20,6 +22,7 @@ import {
 
 interface DiskAnalyzerWorkspaceProps {
   onBack: () => void;
+  onJumpClean: (mode: CleanMode, roots?: string[]) => void;
 }
 
 type Phase = "idle" | "analyzing" | "done";
@@ -59,6 +62,56 @@ function prefersReducedMotion(): boolean {
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
+}
+
+function suggestCleanForEntry(entry: DiskUsageEntry): {
+  mode: CleanMode;
+  roots: string[];
+  label: string;
+} | null {
+  const p = entry.path.toLowerCase().replace(/\//g, "\\");
+  const hint = (entry.hint ?? "").toLowerCase();
+
+  if (
+    p.includes("docker") ||
+    p.includes("wsl") ||
+    p.includes("ext4.vhdx") ||
+    hint.includes("docker")
+  ) {
+    return { mode: "docker", roots: [], label: "Docker 清理" };
+  }
+  if (
+    p.includes("\\temp") ||
+    p.includes("\\tmp") ||
+    p.includes("prefetch") ||
+    p.includes("deliveryoptimization") ||
+    p.includes("$recycle.bin") ||
+    p.includes("windows.old") ||
+    hint.includes("临时") ||
+    hint.includes("回收站")
+  ) {
+    return { mode: "system", roots: [], label: "系统清理" };
+  }
+  if (
+    p.includes("node_modules") ||
+    p.includes("\\target") ||
+    p.includes(".gradle") ||
+    p.includes(".m2") ||
+    p.includes(".cargo") ||
+    p.includes("npm-cache") ||
+    p.includes("pnpm") ||
+    p.includes(".next") ||
+    p.includes("nuget") ||
+    hint.includes("缓存") ||
+    hint.includes("可尝试清理")
+  ) {
+    return { mode: "dev", roots: [entry.path], label: "开发清理" };
+  }
+  if (p.includes("download") || p.includes("downloads")) {
+    return { mode: "stale", roots: [entry.path], label: "闲置清理" };
+  }
+  // Default: treat as large-file scan root (directory itself)
+  return { mode: "large", roots: [entry.path], label: "大文件清理" };
 }
 
 function useAnimatedNumber(target: number, duration = 420): number {
@@ -109,6 +162,7 @@ function hintTone(hint: string | null): "sea" | "warn" | "ink" | null {
 
 export default function DiskAnalyzerWorkspace({
   onBack,
+  onJumpClean,
 }: DiskAnalyzerWorkspaceProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [drive, setDrive] = useState("C:\\");
@@ -477,6 +531,7 @@ export default function DiskAnalyzerWorkspace({
                           ? pct(entry.bytes, result.driveUsedBytes)
                           : pct(entry.bytes, barBase);
                       const tone = hintTone(entry.hint);
+                      const jump = suggestCleanForEntry(entry);
                       return (
                         <li
                           key={entry.path}
@@ -513,19 +568,39 @@ export default function DiskAnalyzerWorkspace({
                                 </p>
                               )}
                             </div>
-                            <div className="flex shrink-0 items-baseline gap-2 sm:min-w-[6.5rem] sm:justify-end">
-                              <span className="text-[13px] font-semibold tabular-nums text-[var(--color-ink)]">
-                                {formatBytes(entry.bytes)}
-                              </span>
-                              {group === "drive_root" &&
-                                result.driveUsedBytes > 0 && (
-                                  <span className="font-mono text-[11px] tabular-nums text-[var(--color-ink)]/40">
-                                    {pctLabel(
-                                      entry.bytes,
-                                      result.driveUsedBytes,
-                                    )}
-                                  </span>
-                                )}
+                            <div className="flex shrink-0 items-center gap-2 sm:min-w-[10rem] sm:justify-end">
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-[13px] font-semibold tabular-nums text-[var(--color-ink)]">
+                                  {formatBytes(entry.bytes)}
+                                </span>
+                                {group === "drive_root" &&
+                                  result.driveUsedBytes > 0 && (
+                                    <span className="font-mono text-[11px] tabular-nums text-[var(--color-ink)]/40">
+                                      {pctLabel(
+                                        entry.bytes,
+                                        result.driveUsedBytes,
+                                      )}
+                                    </span>
+                                  )}
+                              </div>
+                              {jump && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onJumpClean(
+                                      jump.mode,
+                                      jump.roots.length
+                                        ? jump.roots
+                                        : undefined,
+                                    )
+                                  }
+                                  className="btn-press inline-flex items-center gap-1 rounded-lg border border-[var(--color-sea)]/25 bg-[var(--color-sea)]/8 px-2 py-1 text-[11px] font-medium text-[var(--color-sea)] hover:bg-[var(--color-sea)]/15"
+                                  title={`用「${jump.label}」处理此路径`}
+                                >
+                                  {jump.label}
+                                  <ArrowRight size={11} weight="bold" />
+                                </button>
+                              )}
                             </div>
                           </div>
                           {group !== "drive_root" && (

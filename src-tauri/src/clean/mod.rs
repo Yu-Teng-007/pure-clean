@@ -335,6 +335,7 @@ fn record_category(
     entry.1 += 1;
 }
 
+#[allow(dead_code)]
 pub fn run_clean(
     app: &AppHandle,
     targets: &[CleanTarget],

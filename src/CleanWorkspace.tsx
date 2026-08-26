@@ -137,9 +137,14 @@ function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined 
 interface CleanWorkspaceProps {
   mode: CleanMode;
   onBack: () => void;
+  initialRoots?: string[];
 }
 
-export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
+export default function CleanWorkspace({
+  mode,
+  onBack,
+  initialRoots,
+}: CleanWorkspaceProps) {
   const meta = MODES[mode];
   const [roots, setRoots] = useState<string[]>([]);
   const [rootInput, setRootInput] = useState("");
@@ -161,6 +166,8 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [protectInput, setProtectInput] = useState("");
   const [protectOpen, setProtectOpen] = useState(false);
   const [protectLeaving, setProtectLeaving] = useState(false);
+  const [toRecycleBin, setToRecycleBin] = useState(false);
+  const [dryRun, setDryRun] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -175,12 +182,16 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const [lastCleanSelectedBytes, setLastCleanSelectedBytes] = useState(0);
 
   const cleaningRef = useRef(false);
+  const scanCancelledRef = useRef(false);
+  const cleanCancelledRef = useRef(false);
   const itemsRef = useRef(items);
   const selectedRef = useRef(selected);
   const lastCleanedIdRef = useRef<string | null>(null);
   const exitTimersRef = useRef<number[]>([]);
   const goneIdsRef = useRef<Set<string>>(new Set());
   const exitingIdsRef = useRef<Set<string>>(new Set());
+  const dryRunRef = useRef(false);
+  const toRecycleBinRef = useRef(false);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -260,23 +271,40 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   }, [cleanPhase, cleanProgress?.done, cleanProgress?.total]);
 
   useEffect(() => {
+    dryRunRef.current = dryRun;
+  }, [dryRun]);
+  useEffect(() => {
+    toRecycleBinRef.current = toRecycleBin;
+  }, [toRecycleBin]);
+
+  useEffect(() => {
     (async () => {
       try {
         const cfg = await invoke<AppConfig>("load_config");
-        setRoots(cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]);
+        const fromInitial =
+          initialRoots && initialRoots.length > 0 ? initialRoots : null;
+        setRoots(
+          fromInitial ??
+            (cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]),
+        );
         setSelectCaution(cfg.selectCautionByDefault);
         setStaleDays(cfg.staleDays ?? DEFAULT_STALE_DAYS);
         setProtectedPaths(cfg.protectedPaths ?? []);
+        setToRecycleBin(cfg.toRecycleBinByDefault ?? false);
         if (meta.needsThreshold) {
           setMinFileBytes(defaultThresholdBytes(mode));
         } else {
           setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
         }
       } catch {
-        setRoots(["D:\\YHDJA"]);
+        setRoots(
+          initialRoots && initialRoots.length > 0
+            ? initialRoots
+            : ["D:\\YHDJA"],
+        );
       }
     })();
-  }, [meta.needsThreshold, mode]);
+  }, [meta.needsThreshold, mode, initialRoots]);
 
   useEffect(() => {
     let unsubs: Array<() => void> = [];
@@ -432,6 +460,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
     goneIdsRef.current = new Set();
     setActiveCleanId(null);
     lastCleanedIdRef.current = null;
+    scanCancelledRef.current = false;
     setPhase("scanning");
     setScanProgress({ currentPath: "准备扫描…", itemsFound: 0, bytesFound: 0 });
     try {
@@ -460,10 +489,18 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
       }
       setSelected(next);
       setPhase("ready");
+      if (scanCancelledRef.current && result.items.length > 0) {
+        setError("扫描已取消，已保留目前发现的结果");
+      }
     } catch (e) {
       setError(String(e));
       setPhase("idle");
     }
+  };
+
+  const cancelScan = () => {
+    scanCancelledRef.current = true;
+    void invoke("cancel_scan").catch(() => {});
   };
 
   const grouped = useMemo(() => {
@@ -561,6 +598,10 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
   const executeClean = async () => {
     if (cleaningRef.current) return;
     cleaningRef.current = true;
+    cleanCancelledRef.current = false;
+
+    const useDryRun = dryRunRef.current;
+    const useRecycle = toRecycleBinRef.current;
 
     setCleanModalOpen(true);
     setCleanModalLeaving(false);
@@ -597,9 +638,10 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
             bytes: i.bytes,
             special: i.special,
           })),
-          dryRun: false,
-          toRecycleBin: false,
+          dryRun: useDryRun,
+          toRecycleBin: useRecycle,
           protectedPaths,
+          mode,
         },
       });
 
@@ -621,42 +663,50 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         .map((i) => i.id);
 
       setActiveCleanId(null);
-      const pendingExit = successIds.filter(
-        (id) => !goneIdsRef.current.has(id),
-      );
-      for (const id of pendingExit) markExiting(id);
-      if (pendingExit.length && !prefersReducedMotion()) {
-        await new Promise((r) => setTimeout(r, EXIT_MS));
+
+      // Dry-run does not delete — keep list intact.
+      if (!result.dryRun) {
+        const pendingExit = successIds.filter(
+          (id) => !goneIdsRef.current.has(id),
+        );
+        for (const id of pendingExit) markExiting(id);
+        if (pendingExit.length && !prefersReducedMotion()) {
+          await new Promise((r) => setTimeout(r, EXIT_MS));
+        }
+
+        setItems((prev) =>
+          prev.filter((i) => {
+            if (!selectedRef.current.has(i.id)) return true;
+            if (i.special === "recycle_bin") {
+              return result.failures.some((f) => f.path === "回收站");
+            }
+            if (i.special === "docker_prune") {
+              return result.failures.some(
+                (f) =>
+                  f.path === "Docker system prune" ||
+                  f.path.toLowerCase().includes("docker"),
+              );
+            }
+            return failedPaths.has(i.path);
+          }),
+        );
+        setSelected(new Set());
       }
 
-      setItems((prev) =>
-        prev.filter((i) => {
-          if (!selectedRef.current.has(i.id)) return true;
-          if (i.special === "recycle_bin") {
-            return result.failures.some((f) => f.path === "回收站");
-          }
-          if (i.special === "docker_prune") {
-            return result.failures.some(
-              (f) =>
-                f.path === "Docker system prune" ||
-                f.path.toLowerCase().includes("docker"),
-            );
-          }
-          return failedPaths.has(i.path);
-        }),
-      );
       clearExitTimers();
       setExitingIds(new Set());
       setGoneIds(new Set());
       exitingIdsRef.current = new Set();
       goneIdsRef.current = new Set();
-      setSelected(new Set());
       lastCleanedIdRef.current = null;
       setCleanProgressPct(100);
       setCleanStage(3);
       setReport(result);
       setCleanPhase("done");
       setPhase("done");
+      if (cleanCancelledRef.current) {
+        setError("清理已取消，已完成部分项目");
+      }
     } catch (e) {
       setError(String(e));
       setCleanPhase("error");
@@ -670,6 +720,11 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
     } finally {
       cleaningRef.current = false;
     }
+  };
+
+  const cancelClean = () => {
+    cleanCancelledRef.current = true;
+    void invoke("cancel_clean").catch(() => {});
   };
 
   const runClean = async () => {
@@ -972,13 +1027,22 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
           {phase === "scanning" && scanProgress && (
             <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50">
               <div className="scan-rail" aria-hidden />
-              <p className="mt-2 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
-                {scanProgress.currentPath}
-                <span className="ml-2">
-                  已发现 {scanProgress.itemsFound} 项 /{" "}
-                  {formatBytes(scanProgress.bytesFound)}
-                </span>
-              </p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <p className="min-w-0 flex-1 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
+                  {scanProgress.currentPath}
+                  <span className="ml-2">
+                    已发现 {scanProgress.itemsFound} 项 /{" "}
+                    {formatBytes(scanProgress.bytesFound)}
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={cancelScan}
+                  className="btn-press shrink-0 rounded-lg border border-[var(--color-sand)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]"
+                >
+                  取消扫描
+                </button>
+              </div>
             </div>
           )}
           {error && (
@@ -1147,12 +1211,61 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
               确认清理？
             </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
-              将永久删除 <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-              <strong className="font-mono">
-                {formatBytes(selectedBytes)}
-              </strong>
-              。缓存类目录通常可安全重建；高风险项请确认无程序占用。
+              {dryRun ? (
+                <>
+                  将<strong>模拟</strong>处理{" "}
+                  <strong>{selectedItems.length}</strong> 项，预计可释放{" "}
+                  <strong className="font-mono">
+                    {formatBytes(selectedBytes)}
+                  </strong>
+                  ，不会实际删除任何文件。
+                </>
+              ) : (
+                <>
+                  将{toRecycleBin ? "移入回收站" : "永久删除"}{" "}
+                  <strong>{selectedItems.length}</strong> 项，预计释放{" "}
+                  <strong className="font-mono">
+                    {formatBytes(selectedBytes)}
+                  </strong>
+                  。缓存类目录通常可安全重建；高风险项请确认无程序占用。
+                </>
+              )}
             </p>
+
+            <div className="mt-4 space-y-2.5 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
+              <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
+                <input
+                  type="checkbox"
+                  checked={toRecycleBin}
+                  disabled={dryRun}
+                  onChange={(e) => setToRecycleBin(e.target.checked)}
+                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30 disabled:opacity-40"
+                />
+                <span>
+                  <span className="font-medium">移到回收站</span>
+                  <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                    代替永久删除，可从回收站恢复
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(e) => {
+                    setDryRun(e.target.checked);
+                  }}
+                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30"
+                />
+                <span>
+                  <span className="font-medium">仅模拟（Dry-run）</span>
+                  <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                    只估算释放空间，不实际删除
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -1166,7 +1279,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                 onClick={() => void runClean()}
                 className="btn-press rounded-xl px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
-                确认删除
+                {dryRun ? "开始模拟" : toRecycleBin ? "移入回收站" : "确认删除"}
               </button>
             </div>
           </div>
@@ -1200,6 +1313,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
         selectedBytes={lastCleanSelectedBytes}
         onClose={closeCleanModal}
         onRetry={() => void executeClean()}
+        onCancel={cancelClean}
       />
     </div>
   );

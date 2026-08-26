@@ -31,3 +31,8 @@ pub fn append_history(entry: HistoryEntry) -> Result<(), String> {
         serde_json::to_string_pretty(&list).map_err(|e| format!("序列化历史失败: {e}"))?;
     fs::write(&path, text).map_err(|e| format!("写入历史失败: {e}"))
 }
+
+pub fn clear_history() -> Result<(), String> {
+    let path = history_path()?;
+    fs::write(&path, "[]").map_err(|e| format!("清空历史失败: {e}"))
+}

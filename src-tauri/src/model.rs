@@ -188,6 +188,8 @@ pub struct CleanRequest {
     pub dry_run: Option<bool>,
     pub to_recycle_bin: Option<bool>,
     pub protected_paths: Option<Vec<String>>,
+    /// Clean mode id (safe/dev/system/…) or "optimize" for history display.
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +239,44 @@ pub struct HistoryEntry {
     pub dry_run: bool,
     pub to_recycle_bin: bool,
     pub by_category: Vec<CategoryFreed>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevCachePathItem {
+    pub path: String,
+    pub bytes: u64,
+    pub category: Category,
+    pub category_label: String,
+    pub risk: Risk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevCacheToolGroup {
+    pub id: String,
+    pub label: String,
+    pub bytes: u64,
+    pub paths: Vec<DevCachePathItem>,
+    pub suggested_mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectWasteItem {
+    pub project_path: String,
+    pub project_name: String,
+    pub bytes: u64,
+    pub details: Vec<DevCachePathItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevCacheDashboard {
+    pub tool_groups: Vec<DevCacheToolGroup>,
+    pub projects: Vec<ProjectWasteItem>,
+    pub total_tool_bytes: u64,
+    pub total_project_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

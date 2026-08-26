@@ -25,6 +25,7 @@ interface CleanProgressModalProps {
   selectedBytes: number;
   onClose: () => void;
   onRetry: () => void;
+  onCancel?: () => void;
 }
 
 export default function CleanProgressModal({
@@ -41,6 +42,7 @@ export default function CleanProgressModal({
   selectedBytes,
   onClose,
   onRetry,
+  onCancel,
 }: CleanProgressModalProps) {
   useEffect(() => {
     if (!open || phase === "running") return;
@@ -185,6 +187,15 @@ export default function CleanProgressModal({
                     </div>
                   </div>
                   <div className="scan-rail" aria-hidden />
+                  {onCancel && (
+                    <button
+                      type="button"
+                      onClick={onCancel}
+                      className="btn-press w-full rounded-xl border border-[var(--color-sand)] px-4 py-2 text-[13px] font-medium text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]"
+                    >
+                      取消清理
+                    </button>
+                  )}
                 </>
               )}
             </div>
