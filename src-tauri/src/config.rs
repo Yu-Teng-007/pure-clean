@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,71 @@ use crate::model::Category;
 pub const DEFAULT_MIN_FILE_BYTES: u64 = 500 * 1024 * 1024;
 pub const DEFAULT_STALE_DAYS: u64 = 30;
 pub const DEFAULT_DUPE_MIN_BYTES: u64 = 10 * 1024 * 1024;
+
+/// Common subdirectory names under home or drive roots that often hold projects.
+const PROJECT_DIR_NAMES: &[&str] = &[
+    "Projects",
+    "projects",
+    "code",
+    "dev",
+    "workspace",
+    "src",
+    "repos",
+    "development",
+    "MYCode",
+    "YHDJA",
+];
+
+fn push_unique_dir(out: &mut Vec<String>, seen: &mut HashSet<String>, path: PathBuf) {
+    if !path.is_dir() {
+        return;
+    }
+    let canonical = path
+        .canonicalize()
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    let key = normalize_path_str(&canonical);
+    if key.is_empty() || !seen.insert(key) {
+        return;
+    }
+    out.push(canonical);
+}
+
+/// Discover likely project / code directories on this machine.
+pub fn discover_default_scan_roots() -> Vec<String> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    if let Some(home) = dirs::home_dir() {
+        for name in PROJECT_DIR_NAMES {
+            push_unique_dir(&mut roots, &mut seen, home.join(name));
+        }
+        if let Some(desktop) = dirs::desktop_dir() {
+            for name in ["Projects", "projects", "code"] {
+                push_unique_dir(&mut roots, &mut seen, desktop.join(name));
+            }
+        }
+        if let Some(docs) = dirs::document_dir() {
+            for name in ["Projects", "projects", "code"] {
+                push_unique_dir(&mut roots, &mut seen, docs.join(name));
+            }
+        }
+    }
+
+    // Scan drive letters C–Z for common dev folder names (fast is_dir checks only).
+    for letter in b'C'..=b'Z' {
+        let drive = PathBuf::from(format!("{}:\\", letter as char));
+        if !drive.is_dir() {
+            continue;
+        }
+        for name in PROJECT_DIR_NAMES {
+            push_unique_dir(&mut roots, &mut seen, drive.join(name));
+        }
+    }
+
+    roots
+}
 
 fn default_min_file_bytes() -> u64 {
     DEFAULT_MIN_FILE_BYTES
@@ -43,13 +109,8 @@ pub struct AppConfig {
 
 impl Default for AppConfig {
     fn default() -> Self {
-        let mut scan_roots = Vec::new();
-        let yhdja = PathBuf::from(r"D:\YHDJA");
-        if yhdja.is_dir() {
-            scan_roots.push(yhdja.to_string_lossy().to_string());
-        }
         Self {
-            scan_roots,
+            scan_roots: discover_default_scan_roots(),
             enabled_categories: Category::all(),
             select_caution_by_default: false,
             min_file_bytes: DEFAULT_MIN_FILE_BYTES,

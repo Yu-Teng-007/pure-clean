@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter};
@@ -9,10 +10,12 @@ use crate::hardware::{self, HardwareInfo};
 use crate::history;
 use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
-    AnalyzeResult, Category, CleanReport, CleanRequest, CleanTarget, DevCacheDashboard, DriveInfo,
-    HistoryEntry, OptimizePhase, OptimizeProgress, OptimizeReport, ScanRequest, ScanResult,
-    ScanRoot, StartupFailure,
+    AnalyzeResult, BlockingProcess, Category, CleanReport, CleanRequest, CleanTarget,
+    DevCacheDashboard, DriveInfo, HistoryCleanedItem, HistoryEntry, OptimizePhase, OptimizeProgress,
+    OptimizeReport, RestoreReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
 };
+use crate::process_lock;
+use crate::recycle_restore;
 use crate::scan;
 use crate::startup::{self, StartupItem};
 
@@ -27,17 +30,46 @@ fn optimize_cancelled() -> bool {
     OPTIMIZE_CANCEL.load(Ordering::Relaxed)
 }
 
+fn history_cleaned_items(
+    targets: &[CleanTarget],
+    report: &CleanReport,
+) -> Vec<HistoryCleanedItem> {
+    if report.dry_run || !report.to_recycle_bin {
+        return Vec::new();
+    }
+    let failed_paths: HashSet<String> = report
+        .failures
+        .iter()
+        .map(|f| f.path.clone())
+        .collect();
+    targets
+        .iter()
+        .filter(|t| t.special.is_none() && !failed_paths.contains(&t.path))
+        .map(|t| HistoryCleanedItem {
+            path: t.path.clone(),
+            bytes: t.bytes.unwrap_or(0),
+            special: None,
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub fn get_default_roots() -> Vec<ScanRoot> {
-    let mut roots = Vec::new();
-    let yhdja = std::path::PathBuf::from(r"D:\YHDJA");
-    if yhdja.is_dir() {
-        roots.push(ScanRoot {
-            path: yhdja.to_string_lossy().to_string(),
-            kind: "project".into(),
-            label: "项目根目录 (D:\\YHDJA)".into(),
-        });
-    }
+    let mut roots: Vec<ScanRoot> = config::discover_default_scan_roots()
+        .into_iter()
+        .map(|path| {
+            let label = path
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or(&path)
+                .to_string();
+            ScanRoot {
+                path: path.clone(),
+                kind: "project".into(),
+                label: format!("项目目录 ({label})"),
+            }
+        })
+        .collect();
     roots.push(ScanRoot {
         path: "(全局缓存与系统路径)".into(),
         kind: "global".into(),
@@ -155,6 +187,8 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
         None,
     );
 
+    let cleaned_items = history_cleaned_items(&targets, &report);
+
     let _ = history::append_history(HistoryEntry {
         id: format!(
             "{}",
@@ -171,9 +205,26 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
         dry_run: report.dry_run,
         to_recycle_bin: report.to_recycle_bin,
         by_category: report.by_category.clone(),
+        cleaned_items,
+        restored: false,
     });
 
     report
+}
+
+#[tauri::command]
+pub fn find_locking_processes(path: String) -> Vec<BlockingProcess> {
+    process_lock::find_locking_processes(std::path::Path::new(&path))
+}
+
+#[tauri::command]
+pub fn restore_history(id: String) -> Result<RestoreReport, String> {
+    history::restore_history_entry(&id)
+}
+
+#[tauri::command]
+pub fn open_recycle_bin() -> Result<(), String> {
+    recycle_restore::open_recycle_bin_folder()
 }
 
 #[tauri::command]
@@ -397,6 +448,8 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
         dry_run: clean_report.dry_run,
         to_recycle_bin: clean_report.to_recycle_bin,
         by_category: clean_report.by_category.clone(),
+        cleaned_items: history_cleaned_items(&targets, &clean_report),
+        restored: false,
     });
 
     emit_optimize(&app, OptimizePhase::Startup, "正在优化开机启动项…");

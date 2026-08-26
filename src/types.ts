@@ -30,6 +30,7 @@ export interface ScanItem {
   special: string | null;
   groupId?: string | null;
   isKeeper?: boolean | null;
+  hint?: string | null;
 }
 
 export interface ScanResult {
@@ -54,6 +55,12 @@ export interface CleanProgress {
 export interface CleanFailure {
   path: string;
   error: string;
+  blockingProcesses?: BlockingProcess[];
+}
+
+export interface BlockingProcess {
+  pid: number;
+  name: string;
 }
 
 export interface CategoryFreed {
@@ -202,6 +209,25 @@ export interface HistoryEntry {
   dryRun: boolean;
   toRecycleBin: boolean;
   byCategory: CategoryFreed[];
+  cleanedItems?: HistoryCleanedItem[];
+  restored?: boolean;
+}
+
+export interface HistoryCleanedItem {
+  path: string;
+  bytes: number;
+  special?: string | null;
+}
+
+export interface RestoreReport {
+  restoredCount: number;
+  failures: CleanFailure[];
+}
+
+export interface ScanRoot {
+  path: string;
+  kind: string;
+  label: string;
 }
 
 export interface DevCachePathItem {

@@ -194,6 +194,12 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
         leaving={detailLeaving}
         entry={detail}
         onClose={closeDetail}
+        onRestored={(updated) => {
+          setDetail(updated);
+          setHistory((prev) =>
+            prev.map((h) => (h.id === updated.id ? updated : h)),
+          );
+        }}
       />
     </div>
   );

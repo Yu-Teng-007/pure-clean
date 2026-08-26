@@ -1,13 +1,19 @@
-import { useEffect } from "react";
-import { ClockCountdown, X } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { ArrowCounterClockwise, ClockCountdown, X } from "@phosphor-icons/react";
 import { cleanModeLabel } from "./modes";
-import { formatBytes, type HistoryEntry } from "./types";
+import {
+  formatBytes,
+  type HistoryEntry,
+  type RestoreReport,
+} from "./types";
 
 interface HistoryDetailModalProps {
   open: boolean;
   leaving: boolean;
   entry: HistoryEntry | null;
   onClose: () => void;
+  onRestored?: (entry: HistoryEntry) => void;
 }
 
 export default function HistoryDetailModal({
@@ -15,17 +21,69 @@ export default function HistoryDetailModal({
   leaving,
   entry,
   onClose,
+  onRestored,
 }: HistoryDetailModalProps) {
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    setRestoreMsg(null);
+    setRestoreError(null);
+    setRestoring(false);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, entry?.id]);
 
   if (!open || !entry) return null;
+
+  const canRestore =
+    !entry.dryRun &&
+    entry.toRecycleBin &&
+    !entry.restored &&
+    (entry.cleanedItems?.length ?? 0) > 0;
+
+  const restoreHint = entry.restored
+    ? "已从回收站恢复"
+    : entry.dryRun
+      ? "模拟清理无法恢复"
+      : !entry.toRecycleBin
+        ? "永久删除无法恢复"
+        : !(entry.cleanedItems?.length)
+          ? "旧版记录缺少路径明细，无法自动恢复"
+          : null;
+
+  const handleRestore = async () => {
+    if (!canRestore || restoring) return;
+    setRestoring(true);
+    setRestoreMsg(null);
+    setRestoreError(null);
+    try {
+      const report = await invoke<RestoreReport>("restore_history", {
+        id: entry.id,
+      });
+      if (report.restoredCount > 0) {
+        setRestoreMsg(`已恢复 ${report.restoredCount} 项`);
+        onRestored?.({ ...entry, restored: true });
+      }
+      if (report.failures.length > 0) {
+        setRestoreError(
+          report.failures
+            .slice(0, 3)
+            .map((f) => `${f.path}: ${f.error}`)
+            .join("；"),
+        );
+      }
+    } catch (e) {
+      setRestoreError(String(e));
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   return (
     <div
@@ -74,7 +132,11 @@ export default function HistoryDetailModal({
 
         <section className="mt-4 rounded-2xl border border-[var(--color-sea)]/20 bg-[var(--color-sea)]/8 p-4">
           <p className="text-[11px] text-[var(--color-ink)]/45">
-            {entry.toRecycleBin ? "已移入回收站" : "已释放空间"}
+            {entry.dryRun
+              ? "模拟释放"
+              : entry.toRecycleBin
+                ? "已移入回收站"
+                : "已释放空间"}
           </p>
           <p className="mt-0.5 font-mono text-[1.45rem] font-semibold tracking-tight text-[var(--color-sea)] tabular-nums">
             {formatBytes(entry.freedBytes)}
@@ -92,7 +154,12 @@ export default function HistoryDetailModal({
             <div>
               <dt className="text-[11px] text-[var(--color-ink)]/45">处理</dt>
               <dd className="mt-0.5 text-[13px] font-medium text-[var(--color-ink)]">
-                {entry.toRecycleBin ? "回收站" : "永久删除"}
+                {entry.dryRun
+                  ? "仅模拟"
+                  : entry.toRecycleBin
+                    ? "回收站"
+                    : "永久删除"}
+                {entry.restored ? " · 已恢复" : ""}
               </dd>
             </div>
             <div>
@@ -135,13 +202,50 @@ export default function HistoryDetailModal({
           )}
         </section>
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="btn-press mt-4 w-full rounded-xl bg-[var(--color-sea)] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
-        >
-          关闭
-        </button>
+        {(restoreMsg || restoreError || restoreHint) && (
+          <p
+            className={[
+              "mt-3 rounded-xl px-3 py-2 text-[12px] border",
+              restoreError
+                ? "border-red-200 bg-red-50 text-[var(--color-danger)]"
+                : restoreMsg
+                  ? "border-[var(--color-sea)]/25 bg-[var(--color-sea)]/8 text-[var(--color-sea)]"
+                  : "border-[var(--color-sand)]/60 bg-[var(--color-mist)]/50 text-[var(--color-ink)]/55",
+            ].join(" ")}
+          >
+            {restoreError ?? restoreMsg ?? restoreHint}
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-col gap-2">
+          {canRestore && (
+            <button
+              type="button"
+              disabled={restoring}
+              onClick={() => void handleRestore()}
+              className="btn-press inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--color-sea)]/30 bg-[var(--color-sea)]/10 px-4 py-2.5 text-[13px] font-semibold text-[var(--color-sea)] hover:bg-[var(--color-sea)]/15 disabled:opacity-50"
+            >
+              <ArrowCounterClockwise size={15} weight="bold" />
+              {restoring ? "恢复中…" : "从回收站恢复"}
+            </button>
+          )}
+          {entry.toRecycleBin && (
+            <button
+              type="button"
+              onClick={() => void invoke("open_recycle_bin").catch(() => {})}
+              className="btn-press w-full rounded-xl border border-[var(--color-sand)] px-4 py-2 text-[12.5px] font-medium text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]"
+            >
+              打开系统回收站
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-press w-full rounded-xl bg-[var(--color-sea)] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
+          >
+            关闭
+          </button>
+        </div>
       </div>
     </div>
   );

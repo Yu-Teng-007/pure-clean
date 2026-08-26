@@ -1,4 +1,5 @@
 pub mod dev_cache;
+pub mod hints;
 pub mod rules;
 pub mod size;
 
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, DEFAULT_DUPE_MIN_BYTES, DEFAULT_MIN_FILE_BYTES, DEFAULT_STALE_DAYS};
 use crate::model::{Category, CleanTarget, Risk, ScanItem, ScanProgress, ScanResult};
+use crate::scan::hints::enrich_scan_item;
 use crate::scan::rules::{
     docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
     fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_discovered_large_dirs,
@@ -43,7 +45,7 @@ fn push_unique(
     }
     *items_found += 1;
     *bytes_found = bytes_found.saturating_add(item.bytes);
-    items.push(item);
+    items.push(enrich_scan_item(item));
 }
 
 fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {

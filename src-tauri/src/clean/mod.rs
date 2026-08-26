@@ -335,6 +335,16 @@ fn record_category(
     entry.1 += 1;
 }
 
+fn push_failure(failures: &mut Vec<CleanFailure>, path: String, error: String) {
+    let (error, blocking_processes) =
+        crate::process_lock::enrich_error_with_processes(&path, &error);
+    failures.push(CleanFailure {
+        path,
+        error,
+        blocking_processes,
+    });
+}
+
 #[allow(dead_code)]
 pub fn run_clean(
     app: &AppHandle,
@@ -414,10 +424,11 @@ pub fn run_clean_with_options(
 
         if target.special.is_none() && config::is_protected(Path::new(&target.path), protected_paths)
         {
-            failures.push(CleanFailure {
-                path: target.path.clone(),
-                error: "路径在保护白名单中，已跳过".into(),
-            });
+            push_failure(
+                &mut failures,
+                target.path.clone(),
+                "路径在保护白名单中，已跳过".into(),
+            );
             done += 1;
             emit(label, done, freed_bytes);
             if let Some(cb) = on_item.as_mut() {
@@ -448,25 +459,20 @@ pub fn run_clean_with_options(
                         success_count += 1;
                         record_category(&mut by_cat, target.category.as_ref(), estimate);
                     }
-                    Err(e) => failures.push(CleanFailure {
-                        path: "回收站".into(),
-                        error: e,
-                    }),
+                    Err(e) => push_failure(&mut failures, "回收站".into(), e),
                 },
                 "docker_prune" => match run_docker_prune() {
                     Ok(_) => {
                         success_count += 1;
                         record_category(&mut by_cat, target.category.as_ref(), 0);
                     }
-                    Err(e) => failures.push(CleanFailure {
-                        path: "Docker system prune".into(),
-                        error: e,
-                    }),
+                    Err(e) => push_failure(&mut failures, "Docker system prune".into(), e),
                 },
-                other => failures.push(CleanFailure {
-                    path: other.to_string(),
-                    error: format!("未知特殊项: {other}"),
-                }),
+                other => push_failure(
+                    &mut failures,
+                    other.to_string(),
+                    format!("未知特殊项: {other}"),
+                ),
             }
             done += 1;
             emit(label, done, freed_bytes);
@@ -503,10 +509,11 @@ pub fn run_clean_with_options(
                 outcome.freed_bytes,
             );
         } else {
-            failures.push(CleanFailure {
-                path: target.path.clone(),
-                error: format_failure_message(&target.path, &outcome),
-            });
+            push_failure(
+                &mut failures,
+                target.path.clone(),
+                format_failure_message(&target.path, &outcome),
+            );
         }
 
         done += 1;

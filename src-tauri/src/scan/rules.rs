@@ -69,6 +69,7 @@ pub fn make_item(path: PathBuf, category: Category, risk: Risk, selected: bool) 
         special: None,
         group_id: None,
         is_keeper: None,
+        hint: None,
     }
 }
 
@@ -92,6 +93,7 @@ pub fn make_special_item(
         special: Some(special.to_string()),
         group_id: None,
         is_keeper: None,
+        hint: None,
     }
 }
 
@@ -340,6 +342,7 @@ pub fn scan_large_files(
             special: None,
             group_id: None,
             is_keeper: None,
+            hint: None,
         });
     }
 
@@ -1357,6 +1360,7 @@ pub fn make_file_or_dir_item(
         special: None,
         group_id: None,
         is_keeper: None,
+        hint: None,
     }
 }
 
@@ -1493,6 +1497,7 @@ pub fn scan_duplicate_files(
                     special: None,
                     group_id: Some(group_id.clone()),
                     is_keeper: Some(is_keeper),
+                    hint: None,
                 });
             }
         }
@@ -1581,6 +1586,7 @@ pub fn scan_stale_files(
             special: None,
             group_id: None,
             is_keeper: None,
+            hint: None,
         });
     }
 
@@ -1705,6 +1711,7 @@ pub fn scan_installers(
             special: None,
             group_id: None,
             is_keeper: None,
+            hint: None,
         });
     }
 
@@ -1809,6 +1816,7 @@ pub fn scan_discovered_large_dirs(
                 special: None,
                 group_id: Some("discovered_app_data".into()),
                 is_keeper: None,
+                hint: None,
             });
         }
     }
@@ -1852,6 +1860,7 @@ pub fn scan_discovered_large_dirs(
                 special: None,
                 group_id: Some("discovered_dot_dir".into()),
                 is_keeper: None,
+                hint: None,
             });
         }
     }

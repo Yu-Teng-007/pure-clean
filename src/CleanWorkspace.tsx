@@ -31,6 +31,7 @@ import {
   ScanItem,
   ScanProgress,
   ScanResult,
+  ScanRoot,
 } from "./types";
 
 type Phase = "idle" | "scanning" | "ready" | "cleaning" | "done";
@@ -58,6 +59,13 @@ function riskClass(risk: ScanItem["risk"]): string {
     case "dangerous":
       return "text-[var(--color-danger)] bg-red-500/10";
   }
+}
+
+function scanHintClass(hint: string): string {
+  if (hint.includes("请勿删除") || hint.includes("不可")) {
+    return "text-[var(--color-warn)]";
+  }
+  return "text-[var(--color-ink)]/48";
 }
 
 function prefersReducedMotion(): boolean {
@@ -167,6 +175,7 @@ export default function CleanWorkspace({
   const [protectOpen, setProtectOpen] = useState(false);
   const [protectLeaving, setProtectLeaving] = useState(false);
   const [toRecycleBin, setToRecycleBin] = useState(false);
+  const [dangerousAck, setDangerousAck] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -278,10 +287,18 @@ export default function CleanWorkspace({
         const cfg = await invoke<AppConfig>("load_config");
         const fromInitial =
           initialRoots && initialRoots.length > 0 ? initialRoots : null;
-        setRoots(
-          fromInitial ??
-            (cfg.scanRoots.length ? cfg.scanRoots : ["D:\\YHDJA"]),
-        );
+        if (fromInitial) {
+          setRoots(fromInitial);
+        } else if (cfg.scanRoots.length) {
+          setRoots(cfg.scanRoots);
+        } else {
+          const defaults = await invoke<ScanRoot[]>("get_default_roots");
+          setRoots(
+            defaults
+              .filter((r) => r.kind === "project")
+              .map((r) => r.path),
+          );
+        }
         setSelectCaution(cfg.selectCautionByDefault);
         setStaleDays(cfg.staleDays ?? DEFAULT_STALE_DAYS);
         setProtectedPaths(cfg.protectedPaths ?? []);
@@ -292,11 +309,7 @@ export default function CleanWorkspace({
           setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
         }
       } catch {
-        setRoots(
-          initialRoots && initialRoots.length > 0
-            ? initialRoots
-            : ["D:\\YHDJA"],
-        );
+        setRoots(initialRoots && initialRoots.length > 0 ? initialRoots : []);
       }
     })();
   }, [meta.needsThreshold, mode, initialRoots]);
@@ -520,6 +533,11 @@ export default function CleanWorkspace({
 
   const selectedBytes = useMemo(
     () => selectedItems.reduce((s, i) => s + i.bytes, 0),
+    [selectedItems],
+  );
+
+  const dangerousSelected = useMemo(
+    () => selectedItems.filter((i) => i.risk === "dangerous"),
     [selectedItems],
   );
 
@@ -809,6 +827,11 @@ export default function CleanWorkspace({
               </span>
             )}
           </div>
+          {item.hint && (
+            <p className={`mt-0.5 text-[11px] leading-snug ${scanHintClass(item.hint)}`}>
+              {item.hint}
+            </p>
+          )}
         </div>
         <span className="text-[13px] font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/55">
           {formatBytes(item.bytes)}
@@ -861,7 +884,7 @@ export default function CleanWorkspace({
                   value={rootInput}
                   onChange={(e) => setRootInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && void addRoot()}
-                  placeholder="添加扫描根目录，如 D:\YHDJA"
+                  placeholder="添加扫描根目录，如 D:\Projects"
                   disabled={phase === "scanning" || phase === "cleaning"}
                   className="home-input flex-1 min-w-[200px] rounded-xl border border-[var(--color-sand)] bg-white/85 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
@@ -1165,6 +1188,7 @@ export default function CleanWorkspace({
               type="button"
               disabled={selectedItems.length === 0 || cleanModalOpen}
               onClick={() => {
+                setDangerousAck(false);
                 setConfirmLeaving(false);
                 setConfirmOpen(true);
               }}
@@ -1206,8 +1230,41 @@ export default function CleanWorkspace({
               <strong className="font-mono">
                 {formatBytes(selectedBytes)}
               </strong>
-              。缓存类目录通常可安全重建；高风险项请确认无程序占用。
+              。缓存类目录通常可安全重建。
             </p>
+
+            {dangerousSelected.length > 0 && (
+              <div className="mt-3 rounded-xl border border-[var(--color-danger)]/30 bg-red-50 px-3.5 py-3">
+                <p className="text-[12.5px] font-medium text-[var(--color-danger)]">
+                  含 {dangerousSelected.length} 项高风险内容
+                </p>
+                <ul className="mt-1.5 max-h-24 space-y-1 overflow-y-auto">
+                  {dangerousSelected.slice(0, 8).map((i) => (
+                    <li
+                      key={i.id}
+                      className="truncate font-mono text-[11px] text-[var(--color-ink)]/55"
+                      title={i.path}
+                    >
+                      {i.path}
+                    </li>
+                  ))}
+                  {dangerousSelected.length > 8 && (
+                    <li className="text-[11px] text-[var(--color-ink)]/40">
+                      …另有 {dangerousSelected.length - 8} 项
+                    </li>
+                  )}
+                </ul>
+                <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12.5px] text-[var(--color-ink)]/80">
+                  <input
+                    type="checkbox"
+                    checked={dangerousAck}
+                    onChange={(e) => setDangerousAck(e.target.checked)}
+                    className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-danger)] focus:ring-[var(--color-danger)]/30"
+                  />
+                  <span>我了解风险，确认处理这些高风险项</span>
+                </label>
+              </div>
+            )}
 
             <div className="mt-4 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
               <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
@@ -1236,8 +1293,11 @@ export default function CleanWorkspace({
               </button>
               <button
                 type="button"
+                disabled={
+                  dangerousSelected.length > 0 && !dangerousAck
+                }
                 onClick={() => void runClean()}
-                className="btn-press rounded-xl px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
+                className="btn-press rounded-xl px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-40"
               >
                 {toRecycleBin ? "移入回收站" : "确认删除"}
               </button>

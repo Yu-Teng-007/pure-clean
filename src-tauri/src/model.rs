@@ -93,6 +93,9 @@ pub struct ScanItem {
     /// When true, this is the kept original in a duplicate group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_keeper: Option<bool>,
+    /// User-facing note for paths that need extra care (e.g. system files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,9 +125,18 @@ pub struct CleanProgress {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BlockingProcess {
+    pub pid: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CleanFailure {
     pub path: String,
     pub error: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocking_processes: Vec<BlockingProcess>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +241,15 @@ pub struct AnalyzeResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct HistoryCleanedItem {
+    pub path: String,
+    pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub special: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: String,
     pub timestamp: String,
@@ -239,6 +260,17 @@ pub struct HistoryEntry {
     pub dry_run: bool,
     pub to_recycle_bin: bool,
     pub by_category: Vec<CategoryFreed>,
+    #[serde(default)]
+    pub cleaned_items: Vec<HistoryCleanedItem>,
+    #[serde(default)]
+    pub restored: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReport {
+    pub restored_count: usize,
+    pub failures: Vec<CleanFailure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

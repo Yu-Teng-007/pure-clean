@@ -275,13 +275,24 @@ export default function CleanProgressModal({
                 )}
 
                 {report.failures.length > 0 && (
-                  <ul className="mt-3 space-y-1 border-t border-[var(--color-sand)]/50 pt-3 max-h-28 overflow-y-auto">
+                  <ul className="mt-3 space-y-2 border-t border-[var(--color-sand)]/50 pt-3 max-h-36 overflow-y-auto">
                     {report.failures.map((f) => (
                       <li
                         key={f.path}
-                        className="text-[11px] font-mono text-[var(--color-ink)]/55 leading-snug"
+                        className="text-[11px] leading-snug text-[var(--color-ink)]/55"
                       >
-                        {f.path}: {f.error}
+                        <p className="font-mono break-all">
+                          {f.path}: {f.error}
+                        </p>
+                        {f.blockingProcesses && f.blockingProcesses.length > 0 && (
+                          <p className="mt-0.5 text-[10.5px] text-[var(--color-warn)]">
+                            占用进程：
+                            {f.blockingProcesses
+                              .map((p) => `${p.name} (PID ${p.pid})`)
+                              .join("、")}
+                            。请关闭后重试。
+                          </p>
+                        )}
                       </li>
                     ))}
                   </ul>

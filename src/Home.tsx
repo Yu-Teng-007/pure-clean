@@ -497,6 +497,12 @@ export default function Home({ onOpenTool }: HomeProps) {
         leaving={historyDetailLeaving}
         entry={historyDetail}
         onClose={closeHistoryDetail}
+        onRestored={(updated) => {
+          setHistoryDetail(updated);
+          setHistory((prev) =>
+            prev.map((h) => (h.id === updated.id ? updated : h)),
+          );
+        }}
       />
     </div>
   );

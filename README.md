@@ -39,17 +39,18 @@ npm run tauri:build
 - **安装包 / 镜像**：`*.msi` / setup 类 `*.exe` / `*.iso` 与 Android SDK 残留
 - **Docker / WSL**：虚拟磁盘（vhdx）与 `docker system prune`
 
-默认项目根：`D:\YHDJA`（若存在）。配置保存在 `%APPDATA%\pure-clean\config.json`，清理历史在 `history.json`，禁用的注册表开机项备份在 `startup-disabled.json`。
+默认扫描根：自动探测本机常见开发目录（如 `Projects` / `code` / `dev` 等，若存在）。配置保存在 `%APPDATA%\pure-clean\config.json`，清理历史在 `history.json`，禁用的注册表开机项备份在 `startup-disabled.json`。
 
 ## 体验与安全
 
 - 扫描与删除分离；删除前二次确认
 - **保护路径**：永不扫描 / 删除的白名单（首页与工作台均可配置）
 - **模拟清理（Dry-run）**：只估算释放空间，不实际删除
-- **移到回收站**：可选代替永久删除
+- **移到回收站**：可选代替永久删除；历史详情可尝试从回收站恢复
 - 清理报告按分类汇总，并写入本地历史
 - 首页展示各盘剩余空间与最近清理记录
 - Maven / pnpm store / 浏览器缓存 / 大文件 / IDE / node_modules / Docker 等默认不勾选
-- 清理进行中不可返回首页；删除失败会提示文件占用
+- 清理进行中不可返回首页；删除失败会提示文件占用及可能占用进程
+- 勾选高风险项时需额外确认才能继续清理
 
 删除 Docker / WSL 虚拟磁盘前请先关闭 Docker Desktop 并执行 `wsl --shutdown`。

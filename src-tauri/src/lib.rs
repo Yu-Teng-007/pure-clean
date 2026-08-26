@@ -7,6 +7,8 @@ mod hardware;
 mod history;
 mod memory;
 mod model;
+mod process_lock;
+mod recycle_restore;
 mod scan;
 mod startup;
 
@@ -27,6 +29,9 @@ pub fn run() {
             commands::cancel_dev_cache_scan,
             commands::clear_history,
             commands::scan_dev_caches,
+            commands::find_locking_processes,
+            commands::restore_history,
+            commands::open_recycle_bin,
             commands::format_bytes,
             commands::list_drives,
             commands::analyze_disk_usage,
