@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
@@ -341,6 +342,30 @@ pub fn run_clean(
     to_recycle_bin: bool,
     protected_paths: &[String],
 ) -> CleanReport {
+    run_clean_with_options(
+        app,
+        targets,
+        dry_run,
+        to_recycle_bin,
+        protected_paths,
+        true,
+        None,
+        None,
+    )
+}
+
+/// Like [`run_clean`], with optional progress flood control and cooperative cancel.
+/// `on_item` is called after each target: (label, done, total, freed_bytes).
+pub fn run_clean_with_options(
+    app: &AppHandle,
+    targets: &[CleanTarget],
+    dry_run: bool,
+    to_recycle_bin: bool,
+    protected_paths: &[String],
+    emit_events: bool,
+    cancel: Option<&AtomicBool>,
+    mut on_item: Option<&mut dyn FnMut(&str, usize, usize, u64)>,
+) -> CleanReport {
     let total = targets.len();
     let mut done = 0usize;
     let mut freed_bytes = 0u64;
@@ -348,7 +373,16 @@ pub fn run_clean(
     let mut failures = Vec::new();
     let mut by_cat: HashMap<Category, (u64, usize)> = HashMap::new();
 
+    let cancelled = || {
+        cancel
+            .map(|c| c.load(Ordering::Relaxed))
+            .unwrap_or(false)
+    };
+
     let emit = |current_path: &str, done: usize, freed_bytes: u64| {
+        if !emit_events {
+            return;
+        }
         let _ = app.emit(
             "clean_progress",
             CleanProgress {
@@ -361,6 +395,10 @@ pub fn run_clean(
     };
 
     for target in targets {
+        if cancelled() {
+            break;
+        }
+
         let label = target
             .special
             .as_deref()
@@ -381,6 +419,9 @@ pub fn run_clean(
             });
             done += 1;
             emit(label, done, freed_bytes);
+            if let Some(cb) = on_item.as_mut() {
+                cb(label, done, total, freed_bytes);
+            }
             continue;
         }
 
@@ -391,6 +432,9 @@ pub fn run_clean(
             record_category(&mut by_cat, target.category.as_ref(), estimate);
             done += 1;
             emit(label, done, freed_bytes);
+            if let Some(cb) = on_item.as_mut() {
+                cb(label, done, total, freed_bytes);
+            }
             continue;
         }
 
@@ -425,6 +469,9 @@ pub fn run_clean(
             }
             done += 1;
             emit(label, done, freed_bytes);
+            if let Some(cb) = on_item.as_mut() {
+                cb(label, done, total, freed_bytes);
+            }
             continue;
         }
 
@@ -463,6 +510,9 @@ pub fn run_clean(
 
         done += 1;
         emit(label, done, freed_bytes);
+        if let Some(cb) = on_item.as_mut() {
+            cb(label, done, total, freed_bytes);
+        }
     }
 
     let mut by_category: Vec<CategoryFreed> = by_cat

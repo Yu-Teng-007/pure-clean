@@ -8,12 +8,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, DEFAULT_DUPE_MIN_BYTES, DEFAULT_MIN_FILE_BYTES, DEFAULT_STALE_DAYS};
-use crate::model::{Category, Risk, ScanItem, ScanProgress, ScanResult};
+use crate::model::{Category, CleanTarget, Risk, ScanItem, ScanProgress, ScanResult};
 use crate::scan::rules::{
     docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
     fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_discovered_large_dirs,
     scan_duplicate_files, scan_fixed_paths, scan_installers, scan_large_files, scan_node_modules,
-    scan_project_tree, scan_stale_files,
+    scan_project_tree, scan_stale_files, FixedPath,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -49,6 +49,107 @@ fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
     cancel
         .map(|c| c.load(Ordering::Relaxed))
         .unwrap_or(false)
+}
+
+/// Categories used by one-click smart optimize (safe fixed caches only).
+pub fn smart_optimize_categories() -> Vec<Category> {
+    vec![
+        Category::PackageManagerCache,
+        Category::SystemTemp,
+        Category::RecycleBin,
+        Category::BrowserCache,
+        Category::AppCache,
+        Category::OtherDev,
+        Category::Java,
+        Category::Python,
+        Category::RustTauri,
+        Category::NodeBuild,
+    ]
+}
+
+/// Fast collect for smart optimize: known fixed Safe paths only.
+///
+/// Skips project-tree walks, AppData discovery sizing, and recursive `dir_size`
+/// — those were freezing the UI on open. Bytes are filled after clean.
+pub fn collect_smart_optimize_targets(
+    protected_paths: &[String],
+    cancel: Option<&AtomicBool>,
+    mut on_progress: impl FnMut(&str),
+) -> Vec<CleanTarget> {
+    let enabled: HashSet<Category> = smart_optimize_categories().into_iter().collect();
+    let mut targets = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut fixed: Vec<FixedPath> = Vec::new();
+    fixed.extend(fixed_dev_paths());
+    fixed.extend(fixed_system_paths());
+    fixed.extend(fixed_app_cache_paths());
+
+    for fp in fixed {
+        if is_cancelled(cancel) {
+            break;
+        }
+        if !enabled.contains(&fp.category) {
+            continue;
+        }
+        if fp.risk != Risk::Safe || !fp.selected_by_default {
+            continue;
+        }
+        let path_str = fp.path.to_string_lossy().to_string();
+        on_progress(&path_str);
+        if !fp.path.exists() {
+            continue;
+        }
+        if config::is_protected(&fp.path, protected_paths) {
+            continue;
+        }
+        let key = fp
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| fp.path.clone())
+            .to_string_lossy()
+            .to_string();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        targets.push(CleanTarget {
+            path: key,
+            category: Some(fp.category),
+            bytes: None,
+            special: None,
+        });
+    }
+
+    if !is_cancelled(cancel) && enabled.contains(&Category::RecycleBin) {
+        on_progress("回收站");
+        targets.push(CleanTarget {
+            path: "回收站 (所有驱动器)".into(),
+            category: Some(Category::RecycleBin),
+            bytes: None,
+            special: Some("recycle_bin".into()),
+        });
+    }
+
+    targets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn smart_optimize_collect_stays_fast() {
+        let start = Instant::now();
+        let targets = collect_smart_optimize_targets(&[], None, |_| {});
+        let elapsed = start.elapsed();
+        // Existence checks only — must not walk AppData / project trees.
+        assert!(
+            elapsed.as_secs() < 8,
+            "smart optimize collect too slow: {elapsed:?} ({} targets)",
+            targets.len()
+        );
+    }
 }
 
 pub fn run_scan(

@@ -252,70 +252,33 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
     let protected = cfg.protected_paths.clone();
     let to_recycle = cfg.to_recycle_bin_by_default;
 
-    let mut roots = cfg.scan_roots.clone();
-    if roots.is_empty() {
-        roots = get_default_roots()
-            .into_iter()
-            .filter(|r| r.kind == "project")
-            .map(|r| r.path)
-            .collect();
-    }
+    emit_optimize(&app, OptimizePhase::Scanning, "正在快速定位可安全清理的缓存…");
 
-    emit_optimize(&app, OptimizePhase::Scanning, "正在扫描可安全清理的项目…");
-
-    let safe_categories = vec![
-        Category::RustTauri,
-        Category::NodeBuild,
-        Category::PackageManagerCache,
-        Category::Java,
-        Category::Python,
-        Category::OtherDev,
-        Category::SystemTemp,
-        Category::RecycleBin,
-        Category::BrowserCache,
-        Category::AppCache,
-    ];
-
-    // Silent scan: avoid flooding the webview with per-path scan_progress events
-    // (that was freezing the UI while the modal X looked unresponsive).
-    let scan_result = scan::run_scan(
-        &app,
-        &roots,
-        Some(safe_categories),
-        6,
-        None,
-        None,
-        true,
-        &protected,
-        false,
-        Some(&OPTIMIZE_CANCEL),
-    );
+    // Lightweight strategy: only known fixed Safe paths (existence check).
+    // Avoid project-tree walks, AppData discovery, and recursive dir sizing —
+    // those froze the UI as soon as optimize opened.
+    let mut last_emit = std::time::Instant::now();
+    let targets = scan::collect_smart_optimize_targets(&protected, Some(&OPTIMIZE_CANCEL), |path| {
+        if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+            let short = path.rsplit(['\\', '/']).next().unwrap_or(path);
+            emit_optimize(
+                &app,
+                OptimizePhase::Scanning,
+                &format!("正在检查：{short}"),
+            );
+            last_emit = std::time::Instant::now();
+        }
+    });
 
     if optimize_cancelled() {
         return Err("cancelled".into());
     }
-
-    let targets: Vec<CleanTarget> = scan_result
-        .items
-        .into_iter()
-        .filter(|i| i.selected_by_default)
-        .map(|i| CleanTarget {
-            path: i.path,
-            category: Some(i.category),
-            bytes: Some(i.bytes),
-            special: i.special,
-        })
-        .collect();
 
     emit_optimize(
         &app,
         OptimizePhase::Cleaning,
         &format!("正在清理 {} 项安全垃圾…", targets.len()),
     );
-
-    if optimize_cancelled() {
-        return Err("cancelled".into());
-    }
 
     let clean_report = if targets.is_empty() {
         CleanReport {
@@ -327,7 +290,33 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
             to_recycle_bin: to_recycle,
         }
     } else {
-        clean::run_clean(&app, &targets, false, to_recycle, &protected)
+        let mut last_clean_emit = std::time::Instant::now();
+        let mut on_item = |label: &str, done: usize, total: usize, freed: u64| {
+            if last_clean_emit.elapsed() < std::time::Duration::from_millis(250) && done < total {
+                return;
+            }
+            let short = label.rsplit(['\\', '/']).next().unwrap_or(label);
+            emit_optimize(
+                &app,
+                OptimizePhase::Cleaning,
+                &format!(
+                    "清理中 {done}/{total}：{short}（已释放 {}）",
+                    crate::scan::size::format_size(freed)
+                ),
+            );
+            last_clean_emit = std::time::Instant::now();
+        };
+        // Silent clean_progress (avoids flooding webview); surface coarse optimize_progress.
+        clean::run_clean_with_options(
+            &app,
+            &targets,
+            false,
+            to_recycle,
+            &protected,
+            false,
+            Some(&OPTIMIZE_CANCEL),
+            Some(&mut on_item),
+        )
     };
 
     if optimize_cancelled() {
