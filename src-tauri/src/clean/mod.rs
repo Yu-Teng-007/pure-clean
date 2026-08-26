@@ -294,7 +294,18 @@ fn run_docker_prune() -> Result<String, String> {
     })
 }
 
-fn format_skip_message(path: &str, outcome: &RemoveOutcome) -> String {
+fn outcome_is_skippable(outcome: &RemoveOutcome) -> bool {
+    if outcome.skipped == 0 {
+        return false;
+    }
+    match &outcome.last_error {
+        Some(e) if e.contains("文件被占用") || e.contains("目录不是空的") => true,
+        None => true,
+        _ => false,
+    }
+}
+
+fn format_failure_message(path: &str, outcome: &RemoveOutcome) -> String {
     let hint = outcome
         .last_error
         .clone()
@@ -435,7 +446,7 @@ pub fn run_clean(
             remove_path_best_effort(path)
         };
 
-        if outcome.skipped == 0 {
+        if outcome.skipped == 0 || outcome_is_skippable(&outcome) {
             freed_bytes = freed_bytes.saturating_add(outcome.freed_bytes);
             success_count += 1;
             record_category(
@@ -443,22 +454,10 @@ pub fn run_clean(
                 target.category.as_ref(),
                 outcome.freed_bytes,
             );
-        } else if outcome.freed_bytes > 0 {
-            freed_bytes = freed_bytes.saturating_add(outcome.freed_bytes);
-            success_count += 1;
-            record_category(
-                &mut by_cat,
-                target.category.as_ref(),
-                outcome.freed_bytes,
-            );
-            failures.push(CleanFailure {
-                path: target.path.clone(),
-                error: format_skip_message(&target.path, &outcome),
-            });
         } else {
             failures.push(CleanFailure {
                 path: target.path.clone(),
-                error: format_skip_message(&target.path, &outcome),
+                error: format_failure_message(&target.path, &outcome),
             });
         }
 

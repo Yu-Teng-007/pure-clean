@@ -971,7 +971,7 @@ export default function CleanWorkspace({ mode, onBack }: CleanWorkspaceProps) {
                     {report.failures.map((f) => (
                       <li
                         key={f.path}
-                        className="text-xs font-mono text-[var(--color-danger)]"
+                        className="text-xs font-mono text-[var(--color-ink)]/55"
                       >
                         {f.path}: {f.error}
                       </li>
