@@ -19,7 +19,7 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-type FilterMode = "all" | "optimize" | "clean" | "dry";
+type FilterMode = "all" | "optimize" | "clean";
 
 export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -47,7 +47,6 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
   const filtered = useMemo(() => {
     return history.filter((h) => {
       if (filter === "optimize") return h.mode === "optimize";
-      if (filter === "dry") return h.dryRun;
       if (filter === "clean") return h.mode !== "optimize";
       return true;
     });
@@ -94,7 +93,6 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
     { id: "all", label: "全部" },
     { id: "optimize", label: "智能优化" },
     { id: "clean", label: "场景清理" },
-    { id: "dry", label: "仅模拟" },
   ];
 
   return (
@@ -167,11 +165,7 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
                     <div className="min-w-0">
                       <p className="text-[13px] font-medium text-[var(--color-ink)]">
                         {cleanModeLabel(h.mode)}
-                        {h.dryRun ? (
-                          <span className="ml-2 rounded-md bg-[var(--color-ink)]/6 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-ink)]/50">
-                            模拟
-                          </span>
-                        ) : h.toRecycleBin ? (
+                        {h.toRecycleBin ? (
                           <span className="ml-2 rounded-md bg-[var(--color-sea)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-sea)]">
                             回收站
                           </span>

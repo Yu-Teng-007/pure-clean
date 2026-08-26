@@ -167,7 +167,6 @@ export default function CleanWorkspace({
   const [protectOpen, setProtectOpen] = useState(false);
   const [protectLeaving, setProtectLeaving] = useState(false);
   const [toRecycleBin, setToRecycleBin] = useState(false);
-  const [dryRun, setDryRun] = useState(false);
   const [activeCleanId, setActiveCleanId] = useState<string | null>(null);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
@@ -190,7 +189,6 @@ export default function CleanWorkspace({
   const exitTimersRef = useRef<number[]>([]);
   const goneIdsRef = useRef<Set<string>>(new Set());
   const exitingIdsRef = useRef<Set<string>>(new Set());
-  const dryRunRef = useRef(false);
   const toRecycleBinRef = useRef(false);
 
   useEffect(() => {
@@ -270,9 +268,6 @@ export default function CleanWorkspace({
     if (real >= 55) setCleanStage((s) => Math.max(s, 2));
   }, [cleanPhase, cleanProgress?.done, cleanProgress?.total]);
 
-  useEffect(() => {
-    dryRunRef.current = dryRun;
-  }, [dryRun]);
   useEffect(() => {
     toRecycleBinRef.current = toRecycleBin;
   }, [toRecycleBin]);
@@ -600,7 +595,6 @@ export default function CleanWorkspace({
     cleaningRef.current = true;
     cleanCancelledRef.current = false;
 
-    const useDryRun = dryRunRef.current;
     const useRecycle = toRecycleBinRef.current;
 
     setCleanModalOpen(true);
@@ -638,7 +632,6 @@ export default function CleanWorkspace({
             bytes: i.bytes,
             special: i.special,
           })),
-          dryRun: useDryRun,
           toRecycleBin: useRecycle,
           protectedPaths,
           mode,
@@ -664,34 +657,31 @@ export default function CleanWorkspace({
 
       setActiveCleanId(null);
 
-      // Dry-run does not delete — keep list intact.
-      if (!result.dryRun) {
-        const pendingExit = successIds.filter(
-          (id) => !goneIdsRef.current.has(id),
-        );
-        for (const id of pendingExit) markExiting(id);
-        if (pendingExit.length && !prefersReducedMotion()) {
-          await new Promise((r) => setTimeout(r, EXIT_MS));
-        }
-
-        setItems((prev) =>
-          prev.filter((i) => {
-            if (!selectedRef.current.has(i.id)) return true;
-            if (i.special === "recycle_bin") {
-              return result.failures.some((f) => f.path === "回收站");
-            }
-            if (i.special === "docker_prune") {
-              return result.failures.some(
-                (f) =>
-                  f.path === "Docker system prune" ||
-                  f.path.toLowerCase().includes("docker"),
-              );
-            }
-            return failedPaths.has(i.path);
-          }),
-        );
-        setSelected(new Set());
+      const pendingExit = successIds.filter(
+        (id) => !goneIdsRef.current.has(id),
+      );
+      for (const id of pendingExit) markExiting(id);
+      if (pendingExit.length && !prefersReducedMotion()) {
+        await new Promise((r) => setTimeout(r, EXIT_MS));
       }
+
+      setItems((prev) =>
+        prev.filter((i) => {
+          if (!selectedRef.current.has(i.id)) return true;
+          if (i.special === "recycle_bin") {
+            return result.failures.some((f) => f.path === "回收站");
+          }
+          if (i.special === "docker_prune") {
+            return result.failures.some(
+              (f) =>
+                f.path === "Docker system prune" ||
+                f.path.toLowerCase().includes("docker"),
+            );
+          }
+          return failedPaths.has(i.path);
+        }),
+      );
+      setSelected(new Set());
 
       clearExitTimers();
       setExitingIds(new Set());
@@ -1211,56 +1201,26 @@ export default function CleanWorkspace({
               确认清理？
             </h3>
             <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
-              {dryRun ? (
-                <>
-                  将<strong>模拟</strong>处理{" "}
-                  <strong>{selectedItems.length}</strong> 项，预计可释放{" "}
-                  <strong className="font-mono">
-                    {formatBytes(selectedBytes)}
-                  </strong>
-                  ，不会实际删除任何文件。
-                </>
-              ) : (
-                <>
-                  将{toRecycleBin ? "移入回收站" : "永久删除"}{" "}
-                  <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-                  <strong className="font-mono">
-                    {formatBytes(selectedBytes)}
-                  </strong>
-                  。缓存类目录通常可安全重建；高风险项请确认无程序占用。
-                </>
-              )}
+              将{toRecycleBin ? "移入回收站" : "永久删除"}{" "}
+              <strong>{selectedItems.length}</strong> 项，预计释放{" "}
+              <strong className="font-mono">
+                {formatBytes(selectedBytes)}
+              </strong>
+              。缓存类目录通常可安全重建；高风险项请确认无程序占用。
             </p>
 
-            <div className="mt-4 space-y-2.5 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
+            <div className="mt-4 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
               <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
                 <input
                   type="checkbox"
                   checked={toRecycleBin}
-                  disabled={dryRun}
                   onChange={(e) => setToRecycleBin(e.target.checked)}
-                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30 disabled:opacity-40"
+                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30"
                 />
                 <span>
                   <span className="font-medium">移到回收站</span>
                   <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
                     代替永久删除，可从回收站恢复
-                  </span>
-                </span>
-              </label>
-              <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
-                <input
-                  type="checkbox"
-                  checked={dryRun}
-                  onChange={(e) => {
-                    setDryRun(e.target.checked);
-                  }}
-                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30"
-                />
-                <span>
-                  <span className="font-medium">仅模拟（Dry-run）</span>
-                  <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
-                    只估算释放空间，不实际删除
                   </span>
                 </span>
               </label>
@@ -1279,7 +1239,7 @@ export default function CleanWorkspace({
                 onClick={() => void runClean()}
                 className="btn-press rounded-xl px-4 py-2 text-sm bg-[var(--color-sea)] text-white font-semibold hover:bg-[var(--color-sea-bright)]"
               >
-                {dryRun ? "开始模拟" : toRecycleBin ? "移入回收站" : "确认删除"}
+                {toRecycleBin ? "移入回收站" : "确认删除"}
               </button>
             </div>
           </div>

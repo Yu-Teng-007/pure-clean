@@ -444,7 +444,7 @@ export default function Home({ onOpenTool }: HomeProps) {
                       className="btn-press w-full rounded-lg py-2.5 text-left outline-none hover:bg-[var(--color-mist)]/60 focus-visible:ring-2 focus-visible:ring-[var(--color-sea)]/35"
                     >
                       <p className="text-[12.5px] font-medium text-[var(--color-ink)]/80">
-                        {h.dryRun ? "模拟释放 " : "释放 "}
+                        释放{" "}
                         <span className="font-mono text-[var(--color-sea)]">
                           {formatBytes(h.freedBytes)}
                         </span>

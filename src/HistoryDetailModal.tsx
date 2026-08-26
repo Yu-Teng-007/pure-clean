@@ -74,11 +74,7 @@ export default function HistoryDetailModal({
 
         <section className="mt-4 rounded-2xl border border-[var(--color-sea)]/20 bg-[var(--color-sea)]/8 p-4">
           <p className="text-[11px] text-[var(--color-ink)]/45">
-            {entry.dryRun
-              ? "模拟释放"
-              : entry.toRecycleBin
-                ? "已移入回收站"
-                : "已释放空间"}
+            {entry.toRecycleBin ? "已移入回收站" : "已释放空间"}
           </p>
           <p className="mt-0.5 font-mono text-[1.45rem] font-semibold tracking-tight text-[var(--color-sea)] tabular-nums">
             {formatBytes(entry.freedBytes)}
@@ -96,11 +92,7 @@ export default function HistoryDetailModal({
             <div>
               <dt className="text-[11px] text-[var(--color-ink)]/45">处理</dt>
               <dd className="mt-0.5 text-[13px] font-medium text-[var(--color-ink)]">
-                {entry.dryRun
-                  ? "仅模拟"
-                  : entry.toRecycleBin
-                    ? "回收站"
-                    : "永久删除"}
+                {entry.toRecycleBin ? "回收站" : "永久删除"}
               </dd>
             </div>
             <div>

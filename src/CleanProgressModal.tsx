@@ -224,11 +224,7 @@ export default function CleanProgressModal({
                   <SuccessCheck />
                   <div className="min-w-0 flex-1">
                     <p className="text-[11px] text-[var(--color-ink)]/45">
-                      {report.dryRun
-                        ? "模拟释放"
-                        : report.toRecycleBin
-                          ? "已移入回收站"
-                          : "已释放空间"}
+                      {report.toRecycleBin ? "已移入回收站" : "已释放空间"}
                     </p>
                     <p className="mt-0.5 font-mono text-[1.45rem] font-semibold tracking-tight text-[var(--color-sea)] tabular-nums animate-freed-flash">
                       {formatBytes(animatedFreed)}
