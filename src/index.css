@@ -1254,3 +1254,36 @@ body {
     transform: none;
   }
 }
+
+/* ——— dark theme ——— */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink: #e8f2ef;
+  --color-mist: #1a2422;
+  --color-foam: #0f1614;
+  --color-sea: #3db89e;
+  --color-sea-bright: #52d4b8;
+  --color-sand: #2a3834;
+  --color-warn: #f59e0b;
+  --color-danger: #f87171;
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse 120% 80% at 10% -20%, #1a3d35 0%, transparent 55%),
+    radial-gradient(ellipse 90% 60% at 100% 0%, #1a2a38 0%, transparent 50%),
+    linear-gradient(165deg, #0f1614 0%, #141c1a 45%, #121816 100%);
+}
+
+html[data-theme="dark"] .ws-panel,
+html[data-theme="dark"] .home-stat {
+  background: color-mix(in srgb, var(--color-mist) 85%, transparent);
+  border-color: var(--color-sand);
+}
+
+html[data-theme="dark"] .home-input,
+html[data-theme="dark"] input[type="search"],
+html[data-theme="dark"] input[type="text"] {
+  background: color-mix(in srgb, var(--color-mist) 70%, black);
+  color: var(--color-ink);
+}

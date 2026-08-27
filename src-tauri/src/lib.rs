@@ -16,9 +16,18 @@ mod context_menu;
 mod startup;
 mod system_tools;
 mod tray;
+mod services;
+mod shell_integration;
+mod winsxs;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Handle Explorer shell menu: pure-clean.exe --analyze "D:\path"
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 3 && args[1] == "--analyze" {
+        let _ = shell_integration::handle_analyze_arg(&args[2]);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -74,6 +83,18 @@ pub fn run() {
             commands::restart_as_admin,
             commands::check_for_updates,
             commands::trigger_cleanup_reminder,
+            commands::export_history,
+            commands::export_config,
+            commands::import_config,
+            commands::import_config_from_path,
+            commands::estimate_duplicate_scan,
+            commands::list_service_suggestions,
+            commands::analyze_winsxs,
+            commands::register_explorer_menu,
+            commands::unregister_explorer_menu,
+            commands::is_explorer_menu_registered,
+            commands::take_pending_analyze_path,
+            commands::open_services_console,
         ])
         .run(tauri::generate_context!())
         .expect("error while running 净界");

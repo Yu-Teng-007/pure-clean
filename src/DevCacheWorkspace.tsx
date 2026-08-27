@@ -8,6 +8,7 @@ import {
   MagnifyingGlass,
   SpinnerGap,
 } from "@phosphor-icons/react";
+import DockerWizardModal from "./DockerWizardModal";
 import WorkspaceHeader from "./WorkspaceHeader";
 import { showToast } from "./Toast";
 import type { CleanMode } from "./modes";
@@ -42,6 +43,7 @@ export default function DevCacheWorkspace({
   const [roots, setRoots] = useState<string[]>([]);
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
+  const [dockerWizardOpen, setDockerWizardOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -69,7 +71,7 @@ export default function DevCacheWorkspace({
     };
   }, []);
 
-  const startScan = useCallback(async () => {
+  const startScan = useCallback(async (force = false) => {
     setPhase("scanning");
     setError(null);
     setDashboard(null);
@@ -77,6 +79,7 @@ export default function DevCacheWorkspace({
     try {
       const result = await invoke<DevCacheDashboard>("scan_dev_caches", {
         roots: roots.length ? roots : null,
+        forceRefresh: force,
       });
       setDashboard(result);
       setPhase("done");
@@ -136,7 +139,14 @@ export default function DevCacheWorkspace({
               )}
               <button
                 type="button"
-                onClick={() => void startScan()}
+                onClick={() => setDockerWizardOpen(true)}
+                className="btn-press rounded-xl border border-[var(--color-sand)] px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+              >
+                Docker 向导
+              </button>
+              <button
+                type="button"
+                onClick={() => void startScan(!!dashboard)}
                 disabled={phase === "scanning"}
                 className={[
                   "btn-press inline-flex min-w-[8rem] items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white",
@@ -368,6 +378,12 @@ export default function DevCacheWorkspace({
           </div>
         )}
       </div>
+
+      <DockerWizardModal
+        open={dockerWizardOpen}
+        onClose={() => setDockerWizardOpen(false)}
+        onJumpClean={() => onJumpClean("docker")}
+      />
     </div>
   );
 }

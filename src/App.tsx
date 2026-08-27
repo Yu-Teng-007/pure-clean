@@ -15,8 +15,22 @@ import SettingsWorkspace from "./SettingsWorkspace";
 import StartupWorkspace from "./StartupWorkspace";
 import TitleBar from "./TitleBar";
 import ToastHost, { showToast } from "./Toast";
+import { useKeyboardShortcut } from "./useKeyboardShortcut";
 import type { CleanMode } from "./modes";
-import type { AppConfig } from "./types";
+import type { AppConfig, ScheduleReminderPayload } from "./types";
+
+function applyTheme(theme: AppConfig["theme"]) {
+  const root = document.documentElement;
+  const resolved =
+    theme === "dark"
+      ? "dark"
+      : theme === "light"
+        ? "light"
+        : window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+  root.setAttribute("data-theme", resolved);
+}
 
 export default function App() {
   const [view, setView] = useState<AppView>(null);
@@ -42,6 +56,31 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await invoke<AppConfig>("load_config");
+        applyTheme(cfg.theme ?? "system");
+      } catch {
+        applyTheme("system");
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const pending = await invoke<string | null>("take_pending_analyze_path");
+        if (pending) {
+          showToast(`已从资源管理器打开：${pending}`);
+          setView({ kind: "tool", tool: "diskAnalyzer" });
+        }
+      } catch {
+        /* optional */
+      }
+    })();
+  }, []);
+
   // Esc 返回上一层（有弹层时由弹层自行拦截）
   useEffect(() => {
     if (!view) return;
@@ -61,8 +100,8 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     (async () => {
-      unlisten = await listen("schedule_reminder", () => {
-        showToast("磁盘缓存可能已累积，建议运行一次扫描");
+      unlisten = await listen<ScheduleReminderPayload>("schedule_reminder", (e) => {
+        showToast(e.payload.message);
       });
     })();
     return () => {
@@ -84,6 +123,10 @@ export default function App() {
       }
     })();
   }, []);
+
+  useKeyboardShortcut("mod+,", () => openTool("settings"));
+  useKeyboardShortcut("mod+h", () => openTool("history"));
+  useKeyboardShortcut("mod+shift+c", () => openTool("cleanHub"));
 
   return (
     <div className="h-full flex flex-col">

@@ -41,6 +41,8 @@ export interface ScanResult {
   items: ScanItem[];
   totalBytes: number;
   scannedRoots: string[];
+  dupEstimateSeconds?: number | null;
+  dupCandidateFiles?: number | null;
 }
 
 export interface ScanProgress {
@@ -370,6 +372,34 @@ export interface AppConfig {
   lastReminderAt?: string | null;
   runInTray: boolean;
   checkUpdatesOnStart: boolean;
+  theme?: "system" | "light" | "dark";
+  protectedGlobs?: string[];
+}
+
+export interface ScheduleReminderPayload {
+  estimatedItems: number;
+  estimatedBytes: number;
+  message: string;
+}
+
+export interface ServiceSuggestion {
+  name: string;
+  displayName: string;
+  state: string;
+  startMode: string;
+  hint: string;
+}
+
+export interface WinSxSHint {
+  reclaimableBytes?: number | null;
+  summary: string;
+  rawExcerpt?: string | null;
+}
+
+export interface DupScanEstimate {
+  candidateFiles: number;
+  totalBytes: number;
+  estimatedSeconds: number;
 }
 
 export function formatBytes(bytes: number): string {

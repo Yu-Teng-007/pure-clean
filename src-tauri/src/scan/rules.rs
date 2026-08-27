@@ -472,6 +472,18 @@ pub fn fixed_dev_paths() -> Vec<FixedPath> {
             cargo.join("git").join("db"),
             Category::RustTauri,
         );
+        // Flutter / Dart pub cache
+        push_caution_cache(
+            &mut paths,
+            home.join(".pub-cache"),
+            Category::OtherDev,
+        );
+        // .NET SDK / MSBuild caches
+        push_caution_cache(
+            &mut paths,
+            home.join(".dotnet").join("tools"),
+            Category::OtherDev,
+        );
     }
 
     // npm cache + Electron IDE caches (Roaming)
@@ -1430,6 +1442,7 @@ pub fn scan_duplicate_files(
     root: &Path,
     min_bytes: u64,
     max_depth: usize,
+    extensions: Option<&[String]>,
     on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
     use rayon::prelude::*;
@@ -1473,6 +1486,21 @@ pub fn scan_duplicate_files(
         };
         if meta.len() < min_bytes {
             continue;
+        }
+        if let Some(exts) = extensions {
+            if !exts.is_empty() {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase())
+                    .unwrap_or_default();
+                let allowed = exts
+                    .iter()
+                    .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
+                if !allowed {
+                    continue;
+                }
+            }
         }
         by_size.entry(meta.len()).or_default().push(path.to_path_buf());
     }
@@ -1554,6 +1582,71 @@ pub fn scan_duplicate_files(
     }
 
     items
+}
+
+/// Rough duplicate-scan duration estimate from file count and total bytes.
+pub fn estimate_duplicate_scan(
+    root: &Path,
+    min_bytes: u64,
+    max_depth: usize,
+    extensions: Option<&[String]>,
+) -> (usize, u64, u64) {
+    let mut file_count = 0usize;
+    let mut total_bytes = 0u64;
+    if !root.is_dir() || min_bytes == 0 {
+        return (0, 0, 0);
+    }
+    let walker = WalkDir::new(root)
+        .follow_links(false)
+        .max_depth(max_depth)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.path_is_symlink() {
+                return false;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() && should_skip_file_scan_dir(&name) {
+                return false;
+            }
+            true
+        });
+    for entry in walker.filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() < min_bytes {
+            continue;
+        }
+        if let Some(exts) = extensions {
+            if !exts.is_empty() {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase())
+                    .unwrap_or_default();
+                let allowed = exts
+                    .iter()
+                    .any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
+                if !allowed {
+                    continue;
+                }
+            }
+        }
+        file_count += 1;
+        total_bytes = total_bytes.saturating_add(meta.len());
+    }
+    // Heuristic: ~2ms per candidate file + 1s per 500MB hashed
+    let secs = (file_count as u64 * 2) / 1000 + total_bytes / (500 * 1024 * 1024);
+    let estimated_secs = secs.max(if file_count > 1000 { 30 } else { 5 });
+    (file_count, total_bytes, estimated_secs)
 }
 
 /// Files not modified for `stale_days` under root (and optional Downloads).

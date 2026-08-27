@@ -34,7 +34,11 @@ fn restore_paths_windows(paths: &[String]) -> RestoreReport {
 
     for path in paths {
         let norm = normalize_path(path);
-        let Some((r_path, original)) = index.get(&norm).cloned() else {
+        let resolved = index
+            .get(&norm)
+            .cloned()
+            .or_else(|| lookup_by_basename(&index, path));
+        let Some((r_path, original)) = resolved else {
             failures.push(CleanFailure {
                 path: path.clone(),
                 error: "在回收站中未找到对应项（可能已被永久删除或清空）".into(),
@@ -74,6 +78,36 @@ fn restore_one(r_path: &Path, original: &Path) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
     fs::rename(r_path, original).map_err(|e| format!("恢复失败: {e}"))
+}
+
+/// Fallback: match recycle-bin entry by file/dir basename when full path lookup fails.
+#[cfg(windows)]
+fn lookup_by_basename(
+    index: &std::collections::HashMap<String, (PathBuf, String)>,
+    requested: &str,
+) -> Option<(PathBuf, String)> {
+    let basename = Path::new(requested)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())?;
+    if basename.is_empty() {
+        return None;
+    }
+    let mut matches: Vec<(PathBuf, String)> = index
+        .values()
+        .filter(|(_, original)| {
+            Path::new(original)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case(&basename))
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+    if matches.len() == 1 {
+        return Some(matches.remove(0));
+    }
+    None
 }
 
 #[cfg(windows)]
@@ -116,13 +150,30 @@ fn build_recycle_index() -> std::collections::HashMap<String, (PathBuf, String)>
     map
 }
 
-/// Parse Windows $I recycle-bin metadata (Vista+ layout).
+/// Parse Windows $I recycle-bin metadata (Vista+ / Win10 layouts).
 #[cfg(windows)]
 fn parse_info_file(info_path: &Path) -> Option<String> {
     let data = fs::read(info_path).ok()?;
     if data.len() < 24 {
         return None;
     }
+
+    // Win10+ version header at offset 0 (u64)
+    if data.len() >= 8 {
+        let version = u64::from_le_bytes(data[0..8].try_into().ok()?);
+        if version == 2 && data.len() >= 32 {
+            if let Some(path) = parse_utf16_path(&data[32..]) {
+                return Some(path);
+            }
+        }
+        if version == 1 && data.len() >= 20 {
+            if let Some(path) = parse_utf16_path(&data[20..]) {
+                return Some(path);
+            }
+        }
+    }
+
+    // Legacy layout fallback
     let header_size = u32::from_le_bytes(data[16..20].try_into().ok()?) as usize;
     let path_chars = u32::from_le_bytes(data[20..24].try_into().ok()?) as usize;
     let path_start = header_size.max(24);
@@ -130,7 +181,15 @@ fn parse_info_file(info_path: &Path) -> Option<String> {
     if data.len() < path_start + path_bytes {
         return None;
     }
-    let wide: Vec<u16> = data[path_start..path_start + path_bytes]
+    parse_utf16_path(&data[path_start..path_start + path_bytes])
+}
+
+#[cfg(windows)]
+fn parse_utf16_path(bytes: &[u8]) -> Option<String> {
+    if bytes.len() < 2 {
+        return None;
+    }
+    let wide: Vec<u16> = bytes
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .take_while(|&c| c != 0)

@@ -353,12 +353,14 @@ pub fn run_clean(
     to_recycle_bin: bool,
     protected_paths: &[String],
 ) -> CleanReport {
+    let empty: Vec<String> = Vec::new();
+    let protection = config::ProtectionRules::from_slices(protected_paths, &empty);
     run_clean_with_options(
         app,
         targets,
         dry_run,
         to_recycle_bin,
-        protected_paths,
+        &protection,
         true,
         None,
         None,
@@ -372,7 +374,7 @@ pub fn run_clean_with_options(
     targets: &[CleanTarget],
     dry_run: bool,
     to_recycle_bin: bool,
-    protected_paths: &[String],
+    protection: &config::ProtectionRules<'_>,
     emit_events: bool,
     cancel: Option<&AtomicBool>,
     mut on_item: Option<&mut dyn FnMut(&str, usize, usize, u64)>,
@@ -423,7 +425,7 @@ pub fn run_clean_with_options(
 
         emit(label, done, freed_bytes);
 
-        if target.special.is_none() && config::is_protected(Path::new(&target.path), protected_paths)
+        if target.special.is_none() && protection.check(std::path::Path::new(&target.path))
         {
             push_failure(
                 &mut failures,

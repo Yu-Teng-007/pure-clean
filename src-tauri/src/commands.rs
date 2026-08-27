@@ -11,9 +11,10 @@ use crate::history;
 use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
     AnalyzeResult, BlockingProcess, Category, CleanReport, CleanRequest, CleanTarget,
-    ContextMenuOptimizeReport, DevCacheDashboard, DriveInfo, HistoryCleanedItem, HistoryEntry,
-    OptimizePhase, OptimizeProgress, OptimizeReport, RestoreReport, ScanRequest, ScanResult,
-    ScanRoot, StartupFailure, StartupOptimizeReport,
+    ContextMenuOptimizeReport, DevCacheDashboard, DriveInfo, DupScanEstimate,
+    HistoryCleanedItem, HistoryEntry, OptimizePhase, OptimizeProgress, OptimizeReport,
+    RestoreReport, ScanRequest, ScanResult, ScanRoot, ScheduleReminderPayload,
+    ServiceSuggestion, StartupFailure, StartupOptimizeReport, WinSxSHint,
 };
 use crate::process_lock;
 use crate::recycle_restore;
@@ -22,6 +23,9 @@ use crate::scan;
 use crate::elevation;
 use crate::context_menu::{self, ContextMenuItem};
 use crate::startup::{self, StartupItem};
+use crate::services;
+use crate::shell_integration;
+use crate::winsxs;
 
 /// Cooperative cancel flag for in-flight smart optimize.
 static OPTIMIZE_CANCEL: AtomicBool = AtomicBool::new(false);
@@ -150,9 +154,11 @@ pub async fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
     SCAN_CANCEL.store(false, Ordering::SeqCst);
     let max_depth = request.max_depth.unwrap_or(6);
     let cfg = config::load_config();
-    let protected = request
+    let protected_paths = request
         .protected_paths
         .unwrap_or_else(|| cfg.protected_paths.clone());
+    let protected_globs = cfg.protected_globs.clone();
+    let dup_extensions = request.dup_extensions.clone();
     let categories = filter_categories(
         request.categories.unwrap_or_else(Category::all),
         &cfg,
@@ -164,6 +170,8 @@ pub async fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
     let app = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
+        let protection =
+            config::ProtectionRules::from_slices(&protected_paths, &protected_globs);
         scan::run_scan(
             &app,
             &roots,
@@ -172,7 +180,8 @@ pub async fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
             min_file_bytes,
             stale_days,
             safe_only,
-            &protected,
+            &protection,
+            dup_extensions.as_deref(),
             true,
             Some(&SCAN_CANCEL),
         )
@@ -205,10 +214,11 @@ pub fn cancel_dev_cache_scan() {
 pub async fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
     CLEAN_CANCEL.store(false, Ordering::SeqCst);
     let cfg = config::load_config();
-    let protected = request
+    let protected_paths = request
         .protected_paths
         .clone()
         .unwrap_or_else(|| cfg.protected_paths.clone());
+    let protected_globs = cfg.protected_globs.clone();
     let dry_run = request.dry_run.unwrap_or(false);
     let to_recycle = request
         .to_recycle_bin
@@ -239,12 +249,14 @@ pub async fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
     let targets_for_history = targets.clone();
 
     let report = tauri::async_runtime::spawn_blocking(move || {
+        let protection =
+            config::ProtectionRules::from_slices(&protected_paths, &protected_globs);
         clean::run_clean_with_options(
             &app,
             &targets,
             dry_run,
             to_recycle,
-            &protected,
+            &protection,
             true,
             Some(&CLEAN_CANCEL),
             None,
@@ -309,19 +321,28 @@ pub fn clear_history() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn scan_dev_caches(app: AppHandle, roots: Option<Vec<String>>) -> DevCacheDashboard {
+pub async fn scan_dev_caches(
+    app: AppHandle,
+    roots: Option<Vec<String>>,
+    force_refresh: Option<bool>,
+) -> DevCacheDashboard {
     DEV_CACHE_CANCEL.store(false, Ordering::SeqCst);
     let cfg = config::load_config();
     let scan_roots = roots.unwrap_or_else(|| cfg.scan_roots.clone());
-    let protected = cfg.protected_paths.clone();
+    let protected_paths = cfg.protected_paths.clone();
+    let protected_globs = cfg.protected_globs.clone();
+    let force = force_refresh.unwrap_or(false);
     let app = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
+        let protection =
+            config::ProtectionRules::from_slices(&protected_paths, &protected_globs);
         let mut last_emit = std::time::Instant::now();
         scan::dev_cache::build_dashboard(
             &scan_roots,
-            &protected,
+            &protection,
             Some(&DEV_CACHE_CANCEL),
+            force,
             |path| {
                 if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
                     let _ = app.emit(
@@ -464,27 +485,39 @@ fn emit_optimize(app: &AppHandle, phase: OptimizePhase, message: &str) {
 }
 
 #[tauri::command]
-pub async fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
+pub async fn run_smart_optimize(app: AppHandle, deep: Option<bool>) -> Result<OptimizeReport, String> {
+    let deep = deep.unwrap_or(false);
     let app = app.clone();
-    tauri::async_runtime::spawn_blocking(move || run_smart_optimize_inner(&app))
+    tauri::async_runtime::spawn_blocking(move || run_smart_optimize_inner(&app, deep))
         .await
         .map_err(|e| format!("优化任务异常: {e}"))?
 }
 
-fn run_smart_optimize_inner(app: &AppHandle) -> Result<OptimizeReport, String> {
+fn run_smart_optimize_inner(app: &AppHandle, deep: bool) -> Result<OptimizeReport, String> {
     OPTIMIZE_CANCEL.store(false, Ordering::SeqCst);
 
     let cfg = config::load_config();
-    let protected = cfg.protected_paths.clone();
+    let protection = config::ProtectionRules::from_config(&cfg);
     let to_recycle = cfg.to_recycle_bin_by_default;
+    let scan_roots = cfg.scan_roots.clone();
 
-    emit_optimize(app, OptimizePhase::Scanning, "正在快速定位可安全清理的缓存…");
+    emit_optimize(
+        app,
+        OptimizePhase::Scanning,
+        if deep {
+            "正在深度扫描项目安全构建产物…"
+        } else {
+            "正在快速定位可安全清理的缓存…"
+        },
+    );
 
-    // Lightweight strategy: only known fixed Safe paths (existence check).
-    // Avoid project-tree walks, AppData discovery, and recursive dir sizing —
-    // those froze the UI as soon as optimize opened.
     let mut last_emit = std::time::Instant::now();
-    let targets = scan::collect_smart_optimize_targets(&protected, Some(&OPTIMIZE_CANCEL), |path| {
+    let targets = scan::collect_smart_optimize_targets(
+        &protection,
+        Some(&OPTIMIZE_CANCEL),
+        deep,
+        &scan_roots,
+        |path| {
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             let short = path.rsplit(['\\', '/']).next().unwrap_or(path);
             emit_optimize(
@@ -494,7 +527,8 @@ fn run_smart_optimize_inner(app: &AppHandle) -> Result<OptimizeReport, String> {
             );
             last_emit = std::time::Instant::now();
         }
-    });
+    },
+    );
 
     if optimize_cancelled() {
         return Err("cancelled".into());
@@ -538,7 +572,7 @@ fn run_smart_optimize_inner(app: &AppHandle) -> Result<OptimizeReport, String> {
             &targets,
             false,
             to_recycle,
-            &protected,
+            &protection,
             false,
             Some(&OPTIMIZE_CANCEL),
             Some(&mut on_item),
@@ -626,6 +660,86 @@ pub async fn check_for_updates(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn trigger_cleanup_reminder(app: AppHandle) -> Result<bool, String> {
-    scheduler::check_and_notify(&app, true)
+pub fn trigger_cleanup_reminder(app: AppHandle) -> Result<ScheduleReminderPayload, String> {
+    scheduler::check_and_notify(&app, true)?;
+    Ok(scheduler::estimate_cleanup())
+}
+
+#[tauri::command]
+pub fn export_history() -> Result<String, String> {
+    history::export_history_json()
+}
+
+#[tauri::command]
+pub fn export_config() -> Result<String, String> {
+    config::export_config_json()
+}
+
+#[tauri::command]
+pub fn import_config(text: String) -> Result<AppConfig, String> {
+    config::import_config_json(&text)
+}
+
+#[tauri::command]
+pub fn import_config_from_path(path: String) -> Result<AppConfig, String> {
+    config::import_config_from_path(&path)
+}
+
+#[tauri::command]
+pub fn estimate_duplicate_scan(
+    root: String,
+    min_bytes: Option<u64>,
+    max_depth: Option<usize>,
+    extensions: Option<Vec<String>>,
+) -> DupScanEstimate {
+    use std::path::Path;
+    let min = min_bytes.unwrap_or(config::DEFAULT_DUPE_MIN_BYTES);
+    let depth = max_depth.unwrap_or(8);
+    let (candidate_files, total_bytes, estimated_seconds) =
+        scan::rules::estimate_duplicate_scan(
+            Path::new(&root),
+            min,
+            depth,
+            extensions.as_deref(),
+        );
+    DupScanEstimate {
+        candidate_files,
+        total_bytes,
+        estimated_seconds,
+    }
+}
+
+#[tauri::command]
+pub fn list_service_suggestions() -> Vec<ServiceSuggestion> {
+    services::list_service_suggestions()
+}
+
+#[tauri::command]
+pub fn analyze_winsxs() -> WinSxSHint {
+    winsxs::analyze_winsxs()
+}
+
+#[tauri::command]
+pub fn register_explorer_menu() -> Result<(), String> {
+    shell_integration::register_explorer_menu()
+}
+
+#[tauri::command]
+pub fn unregister_explorer_menu() -> Result<(), String> {
+    shell_integration::unregister_explorer_menu()
+}
+
+#[tauri::command]
+pub fn is_explorer_menu_registered() -> bool {
+    shell_integration::is_explorer_menu_registered()
+}
+
+#[tauri::command]
+pub fn take_pending_analyze_path() -> Option<String> {
+    shell_integration::take_pending_analyze_path()
+}
+
+#[tauri::command]
+pub fn open_services_console() -> Result<(), String> {
+    shell_integration::open_services_console()
 }

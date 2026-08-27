@@ -4,7 +4,7 @@ use crate::config;
 use crate::model::{HistoryEntry, RestoreReport};
 use crate::recycle_restore;
 
-const MAX_HISTORY: usize = 50;
+const MAX_HISTORY: usize = 200;
 
 fn history_path() -> Result<std::path::PathBuf, String> {
     Ok(config::config_dir()?.join("history.json"))
@@ -39,6 +39,11 @@ pub fn append_history(entry: HistoryEntry) -> Result<(), String> {
 
 pub fn clear_history() -> Result<(), String> {
     save_history(&[])
+}
+
+pub fn export_history_json() -> Result<String, String> {
+    let list = load_history();
+    serde_json::to_string_pretty(&list).map_err(|e| format!("导出历史失败: {e}"))
 }
 
 pub fn restore_history_entry(id: &str) -> Result<RestoreReport, String> {

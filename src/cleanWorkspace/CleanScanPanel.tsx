@@ -25,6 +25,9 @@ interface CleanScanPanelProps {
   onCancelScan: () => void;
   onMinFileBytesChange: (bytes: number) => void;
   onStaleDaysChange: (days: number) => void;
+  dupExtensions?: string;
+  dupEstimateHint?: string | null;
+  onDupExtensionsChange?: (value: string) => void;
 }
 
 export default function CleanScanPanel({
@@ -45,6 +48,9 @@ export default function CleanScanPanel({
   onCancelScan,
   onMinFileBytesChange,
   onStaleDaysChange,
+  dupExtensions = "",
+  dupEstimateHint,
+  onDupExtensionsChange,
 }: CleanScanPanelProps) {
   const meta = MODES[mode];
 
@@ -168,6 +174,24 @@ export default function CleanScanPanel({
               />
               MB
             </label>
+          </div>
+        )}
+
+        {mode === "dupes" && onDupExtensionsChange && (
+          <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50 space-y-2">
+            <label className="block text-xs text-[var(--color-ink)]/55">
+              扩展名过滤（可选，逗号分隔，如 zip, mp4, iso）
+            </label>
+            <input
+              value={dupExtensions}
+              onChange={(e) => onDupExtensionsChange(e.target.value)}
+              disabled={phase === "scanning" || phase === "cleaning"}
+              placeholder="留空则扫描所有大文件"
+              className="home-input w-full rounded-xl border border-[var(--color-sand)] bg-white/85 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+            />
+            {dupEstimateHint && (
+              <p className="text-[11.5px] text-[var(--color-warn)]">{dupEstimateHint}</p>
+            )}
           </div>
         )}
 

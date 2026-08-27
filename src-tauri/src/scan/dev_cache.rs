@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use walkdir::WalkDir;
 
-use crate::config;
+use crate::config::{self, ProtectionRules};
 use crate::model::{
     Category, DevCacheDashboard, DevCachePathItem, DevCacheToolGroup, ProjectWasteItem, Risk,
 };
@@ -55,6 +57,9 @@ fn tool_for_path(path: &Path, category: &Category) -> (&'static str, &'static st
     if s.contains("conda") || s.contains("miniforge") || s.contains("anaconda") {
         return ("conda", "Conda");
     }
+    if s.contains("pub-cache") || s.contains(".pub-cache") {
+        return ("flutter", "Flutter / Dart");
+    }
     if s.contains("jetbrains")
         || s.contains("code - oss")
         || s.contains("cursor")
@@ -90,7 +95,7 @@ fn path_item(path: PathBuf, category: Category, risk: Risk) -> DevCachePathItem 
 }
 
 fn scan_tool_groups(
-    protected: &[String],
+    protection: &config::ProtectionRules<'_>,
     cancel: Option<&AtomicBool>,
     on_progress: &mut dyn FnMut(&str),
 ) -> Vec<DevCacheToolGroup> {
@@ -104,7 +109,7 @@ fn scan_tool_groups(
         if !fp.path.exists() {
             continue;
         }
-        if config::is_protected(&fp.path, protected) {
+        if protection.check(&fp.path) {
             continue;
         }
         let path_str = fp.path.to_string_lossy().to_string();
@@ -147,13 +152,14 @@ fn is_project_waste_dir(name: &str) -> Option<(Category, Risk)> {
             Some((Category::Python, Risk::Safe))
         }
         ".cache" => Some((Category::OtherDev, Risk::Caution)),
+        ".dart_tool" => Some((Category::OtherDev, Risk::Safe)),
         _ => None,
     }
 }
 
 fn scan_project_waste(
     roots: &[String],
-    protected: &[String],
+    protection: &ProtectionRules<'_>,
     max_depth: usize,
     cancel: Option<&AtomicBool>,
     on_progress: &mut dyn FnMut(&str),
@@ -190,7 +196,6 @@ fn scan_project_waste(
             let Some((category, risk)) = is_project_waste_dir(name) else {
                 continue;
             };
-            // Skip nested node_modules / target under another waste dir
             if let Some(parent) = path.parent() {
                 if let Some(pname) = parent.file_name().and_then(|s| s.to_str()) {
                     if is_project_waste_dir(pname).is_some() {
@@ -198,7 +203,7 @@ fn scan_project_waste(
                     }
                 }
             }
-            if config::is_protected(path, protected) {
+            if protection.check(path) {
                 continue;
             }
             let path_str = path.to_string_lossy().to_string();
@@ -241,26 +246,62 @@ fn scan_project_waste(
     list
 }
 
+const DASHBOARD_TTL: Duration = Duration::from_secs(300);
+
+struct CachedDashboard {
+    key: String,
+    built_at: Instant,
+    data: DevCacheDashboard,
+}
+
+static DASHBOARD_CACHE: Mutex<Option<CachedDashboard>> = Mutex::new(None);
+
+fn dashboard_cache_key(roots: &[String], protection: &ProtectionRules<'_>) -> String {
+    format!("{:?}|{:?}|{:?}", roots, protection.paths, protection.globs)
+}
+
 pub fn build_dashboard(
     roots: &[String],
-    protected: &[String],
+    protection: &ProtectionRules<'_>,
     cancel: Option<&AtomicBool>,
+    force_refresh: bool,
     mut on_progress: impl FnMut(&str),
 ) -> DevCacheDashboard {
-    let tool_groups = scan_tool_groups(protected, cancel, &mut on_progress);
+    let key = dashboard_cache_key(roots, protection);
+    if !force_refresh {
+        if let Ok(guard) = DASHBOARD_CACHE.lock() {
+            if let Some(cached) = guard.as_ref() {
+                if cached.key == key && cached.built_at.elapsed() < DASHBOARD_TTL {
+                    return cached.data.clone();
+                }
+            }
+        }
+    }
+
+    let tool_groups = scan_tool_groups(protection, cancel, &mut on_progress);
     let projects = if is_cancelled(cancel) {
         Vec::new()
     } else {
-        scan_project_waste(roots, protected, 5, cancel, &mut on_progress)
+        scan_project_waste(roots, protection, 5, cancel, &mut on_progress)
     };
 
     let total_tool_bytes = tool_groups.iter().map(|g| g.bytes).sum();
     let total_project_bytes = projects.iter().map(|p| p.bytes).sum();
 
-    DevCacheDashboard {
+    let dashboard = DevCacheDashboard {
         tool_groups,
         projects,
         total_tool_bytes,
         total_project_bytes,
+    };
+
+    if let Ok(mut guard) = DASHBOARD_CACHE.lock() {
+        *guard = Some(CachedDashboard {
+            key,
+            built_at: Instant::now(),
+            data: dashboard.clone(),
+        });
     }
+
+    dashboard
 }

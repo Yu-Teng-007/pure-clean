@@ -17,10 +17,10 @@ use crate::scan::advanced::{
 };
 use crate::scan::hints::enrich_scan_item;
 use crate::scan::rules::{
-    docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
-    fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item, scan_discovered_large_dirs,
-    scan_duplicate_files, scan_fixed_paths, scan_installers, scan_large_files, scan_node_modules,
-    scan_project_tree, scan_stale_files, FixedPath,
+    docker_prune_item, downloads_dir, estimate_duplicate_scan, fixed_app_cache_paths,
+    fixed_dev_paths, fixed_docker_wsl_paths, fixed_system_paths, recycle_bin_item,
+    scan_discovered_large_dirs, scan_duplicate_files, scan_fixed_paths, scan_installers,
+    scan_large_files, scan_node_modules, scan_project_tree, scan_stale_files, FixedPath,
 };
 
 fn emit_progress(app: &AppHandle, path: &str, items_found: usize, bytes_found: u64) {
@@ -39,9 +39,9 @@ fn push_unique(
     items_found: &mut usize,
     bytes_found: &mut u64,
     item: ScanItem,
-    protected: &[String],
+    protection: &config::ProtectionRules<'_>,
 ) {
-    if config::is_protected(Path::new(&item.path), protected) {
+    if protection.check(Path::new(&item.path)) {
         return;
     }
     if items.iter().any(|i| i.path == item.path) {
@@ -79,8 +79,10 @@ pub fn smart_optimize_categories() -> Vec<Category> {
 /// Skips project-tree walks, AppData discovery sizing, and recursive `dir_size`
 /// — those were freezing the UI on open. Bytes are filled after clean.
 pub fn collect_smart_optimize_targets(
-    protected_paths: &[String],
+    protection: &config::ProtectionRules<'_>,
     cancel: Option<&AtomicBool>,
+    deep: bool,
+    scan_roots: &[String],
     mut on_progress: impl FnMut(&str),
 ) -> Vec<CleanTarget> {
     let enabled: HashSet<Category> = smart_optimize_categories().into_iter().collect();
@@ -107,7 +109,7 @@ pub fn collect_smart_optimize_targets(
         if !fp.path.exists() {
             continue;
         }
-        if config::is_protected(&fp.path, protected_paths) {
+        if protection.check(&fp.path) {
             continue;
         }
         let key = fp
@@ -137,6 +139,41 @@ pub fn collect_smart_optimize_targets(
         });
     }
 
+    if deep && !is_cancelled(cancel) {
+        let enabled_set: HashSet<Category> = smart_optimize_categories().into_iter().collect();
+        for root in scan_roots {
+            if is_cancelled(cancel) {
+                break;
+            }
+            let path = Path::new(root);
+            if !path.is_dir() {
+                continue;
+            }
+            on_progress(root);
+            let found = scan_project_tree(path, 4, &enabled_set, &mut |p| {
+                on_progress(p);
+                !is_cancelled(cancel)
+            });
+            for item in found {
+                if item.risk != Risk::Safe || !item.selected_by_default {
+                    continue;
+                }
+                if protection.check(Path::new(&item.path)) {
+                    continue;
+                }
+                if !seen.insert(item.path.clone()) {
+                    continue;
+                }
+                targets.push(CleanTarget {
+                    path: item.path,
+                    category: Some(item.category),
+                    bytes: Some(item.bytes),
+                    special: None,
+                });
+            }
+        }
+    }
+
     targets
 }
 
@@ -148,7 +185,9 @@ mod tests {
     #[test]
     fn smart_optimize_collect_stays_fast() {
         let start = Instant::now();
-        let targets = collect_smart_optimize_targets(&[], None, |_| {});
+        let empty: Vec<String> = Vec::new();
+        let protection = config::ProtectionRules::from_slices(&empty, &empty);
+        let targets = collect_smart_optimize_targets(&protection, None, false, &[], |_| {});
         let elapsed = start.elapsed();
         // Existence checks only — must not walk AppData / project trees.
         assert!(
@@ -167,7 +206,8 @@ pub fn run_scan(
     min_file_bytes: Option<u64>,
     stale_days: Option<u64>,
     safe_only: bool,
-    protected_paths: &[String],
+    protection: &config::ProtectionRules<'_>,
+    dup_extensions: Option<&[String]>,
     emit_events: bool,
     cancel: Option<&AtomicBool>,
 ) -> ScanResult {
@@ -192,6 +232,27 @@ pub fn run_scan(
             if !scan_roots.iter().any(|r| r.eq_ignore_ascii_case(&dl_str)) {
                 scan_roots.push(dl_str);
             }
+        }
+    }
+
+    let mut dup_estimate_seconds: Option<u64> = None;
+    let mut dup_candidate_files: Option<usize> = None;
+    if enabled.contains(&Category::DuplicateFiles) {
+        let mut total_secs = 0u64;
+        let mut total_files = 0usize;
+        for root in &scan_roots {
+            let path = Path::new(root);
+            if !path.is_dir() {
+                continue;
+            }
+            let (count, _, secs) =
+                estimate_duplicate_scan(path, dupe_min, max_depth, dup_extensions);
+            total_files += count;
+            total_secs = total_secs.saturating_add(secs);
+        }
+        if total_files > 0 {
+            dup_candidate_files = Some(total_files);
+            dup_estimate_seconds = Some(total_secs);
         }
     }
 
@@ -228,7 +289,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
 
@@ -244,7 +305,7 @@ pub fn run_scan(
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -261,7 +322,7 @@ pub fn run_scan(
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -271,14 +332,20 @@ pub fn run_scan(
         }
 
         if enabled.contains(&Category::DuplicateFiles) {
-            let dupes = scan_duplicate_files(path, dupe_min, max_depth, progress!());
+            let dupes = scan_duplicate_files(
+                path,
+                dupe_min,
+                max_depth,
+                dup_extensions,
+                progress!(),
+            );
             for item in dupes {
                 push_unique(
                     &mut items,
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -295,7 +362,7 @@ pub fn run_scan(
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -312,7 +379,7 @@ pub fn run_scan(
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -330,7 +397,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
 
@@ -342,7 +409,7 @@ pub fn run_scan(
                     &mut items_found,
                     &mut bytes_found,
                     item,
-                    protected_paths,
+                    protection,
                 );
             }
         }
@@ -355,7 +422,7 @@ pub fn run_scan(
             &mut items_found,
             &mut bytes_found,
             rb,
-            protected_paths,
+            protection,
         );
         let _ = progress!()("回收站");
     }
@@ -367,7 +434,7 @@ pub fn run_scan(
             &mut items_found,
             &mut bytes_found,
             prune,
-            protected_paths,
+            protection,
         );
         let _ = progress!()("Docker prune");
     }
@@ -379,7 +446,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
     }
@@ -391,7 +458,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
     }
@@ -403,7 +470,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
     }
@@ -415,7 +482,7 @@ pub fn run_scan(
                 &mut items_found,
                 &mut bytes_found,
                 item,
-                protected_paths,
+                protection,
             );
         }
     }
@@ -439,5 +506,7 @@ pub fn run_scan(
         items,
         total_bytes,
         scanned_roots: scan_roots,
+        dup_estimate_seconds,
+        dup_candidate_files,
     }
 }

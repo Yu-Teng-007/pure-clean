@@ -4,14 +4,17 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowsClockwise,
   Bell,
+  DownloadSimple,
   FolderSimplePlus,
   GearSix,
   HardDrives,
+  Moon,
   Recycle,
   ShieldCheck,
   ShieldWarning,
   Tray,
   Trash,
+  UploadSimple,
   Wrench,
   X,
 } from "@phosphor-icons/react";
@@ -26,6 +29,8 @@ import {
   MIN_FILE_PRESETS,
   STALE_DAY_PRESETS,
   type Category,
+  type ServiceSuggestion,
+  type WinSxSHint,
 } from "./types";
 
 interface SettingsWorkspaceProps {
@@ -44,16 +49,22 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
   );
   const [elevated, setElevated] = useState<boolean | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [globInput, setGlobInput] = useState("");
+  const [explorerMenu, setExplorerMenu] = useState<boolean | null>(null);
+  const [winsxsHint, setWinsxsHint] = useState<WinSxSHint | null>(null);
+  const [services, setServices] = useState<ServiceSuggestion[]>([]);
 
   const load = useCallback(async () => {
     try {
-      const [cfg, categories, isAdmin] = await Promise.all([
+      const [cfg, categories, isAdmin, menuRegistered] = await Promise.all([
         invoke<AppConfig>("load_config"),
         invoke<Array<{ id: string; label: string }>>("get_categories"),
         invoke<boolean>("is_elevated"),
+        invoke<boolean>("is_explorer_menu_registered"),
       ]);
       setConfig(cfg);
       setElevated(isAdmin);
+      setExplorerMenu(menuRegistered);
       setCategoryLabels(
         Object.fromEntries(categories.map((c) => [c.id, c.label])),
       );
@@ -189,11 +200,95 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
 
   const testReminder = async () => {
     try {
-      await invoke("trigger_cleanup_reminder");
-      showToast("已发送测试提醒");
+      const payload = await invoke<{ message: string }>("trigger_cleanup_reminder");
+      showToast(payload.message);
     } catch (e) {
       showToast(String(e));
     }
+  };
+
+  const exportCfg = async () => {
+    try {
+      const json = await invoke<string>("export_config");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "pure-clean-config.json";
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("配置已导出");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const importCfg = async () => {
+    try {
+      const picked = await open({
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        multiple: false,
+      });
+      if (typeof picked !== "string") return;
+      const next = await invoke<AppConfig>("import_config_from_path", { path: picked });
+      setConfig(next);
+      showToast("配置已导入");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const toggleExplorerMenu = async (register: boolean) => {
+    try {
+      if (register) {
+        await invoke("register_explorer_menu");
+        showToast("已注册资源管理器右键菜单");
+      } else {
+        await invoke("unregister_explorer_menu");
+        showToast("已移除资源管理器右键菜单");
+      }
+      setExplorerMenu(register);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const loadWinsxs = async () => {
+    try {
+      const hint = await invoke<WinSxSHint>("analyze_winsxs");
+      setWinsxsHint(hint);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const loadServices = async () => {
+    try {
+      const list = await invoke<ServiceSuggestion[]>("list_service_suggestions");
+      setServices(list);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const addGlob = async () => {
+    const trimmed = globInput.trim();
+    if (!trimmed || !config) return;
+    const globs = config.protectedGlobs ?? [];
+    if (globs.includes(trimmed)) {
+      setGlobInput("");
+      return;
+    }
+    await persist({ ...config, protectedGlobs: [...globs, trimmed] });
+    setGlobInput("");
+  };
+
+  const removeGlob = async (g: string) => {
+    if (!config) return;
+    await persist({
+      ...config,
+      protectedGlobs: (config.protectedGlobs ?? []).filter((x) => x !== g),
+    });
   };
 
   return (
@@ -643,6 +738,27 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
             </button>
             <button
               type="button"
+              onClick={() => void loadWinsxs()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              分析 WinSxS (DISM)
+            </button>
+            <button
+              type="button"
+              onClick={() => void loadServices()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              加载服务建议
+            </button>
+            <button
+              type="button"
+              onClick={() => void invoke("open_services_console").catch((e) => setError(String(e)))}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              打开 services.msc
+            </button>
+            <button
+              type="button"
               onClick={() => void invoke("open_recycle_bin").catch((e) => setError(String(e)))}
               className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
             >
@@ -650,6 +766,26 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
               打开回收站
             </button>
           </div>
+          {winsxsHint && (
+            <p className="mt-3 text-[12px] text-[var(--color-ink)]/62 leading-relaxed rounded-xl border border-[var(--color-sand)]/60 px-3 py-2">
+              {winsxsHint.summary}
+              {winsxsHint.reclaimableBytes != null && (
+                <span className="block mt-1 font-mono text-[var(--color-sea)]">
+                  {formatBytes(winsxsHint.reclaimableBytes)}
+                </span>
+              )}
+            </p>
+          )}
+          {services.length > 0 && (
+            <ul className="mt-3 max-h-48 overflow-y-auto scroll-thin divide-y divide-[var(--color-sand)]/40 rounded-xl border border-[var(--color-sand)]/60">
+              {services.slice(0, 15).map((s) => (
+                <li key={s.name} className="px-3 py-2 text-[11.5px]">
+                  <p className="font-medium text-[var(--color-ink)]">{s.displayName}</p>
+                  <p className="text-[var(--color-ink)]/45">{s.hint}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section
@@ -711,6 +847,124 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
                 </li>
               ))
             )}
+          </ul>
+        </section>
+
+        <section className="ws-panel rounded-2xl px-4 py-4 animate-fade-up">
+          <div className="flex items-center gap-2">
+            <Moon size={15} weight="duotone" className="text-[var(--color-sea)]" />
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">外观</h2>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(["system", "light", "dark"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  void persist({ ...config, theme: t }).then(() => {
+                    document.documentElement.setAttribute(
+                      "data-theme",
+                      t === "system"
+                        ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                          ? "dark"
+                          : "light"
+                        : t,
+                    );
+                  })
+                }
+                className={[
+                  "btn-press rounded-xl px-3 py-1.5 text-[12px] font-medium border",
+                  (config.theme ?? "system") === t
+                    ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                    : "border-[var(--color-sand)] bg-white hover:bg-[var(--color-mist)]",
+                ].join(" ")}
+              >
+                {t === "system" ? "跟随系统" : t === "light" ? "浅色" : "深色"}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="ws-panel rounded-2xl px-4 py-4 animate-fade-up">
+          <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">配置备份</h2>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void exportCfg()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              <DownloadSimple size={14} weight="bold" />
+              导出配置
+            </button>
+            <button
+              type="button"
+              onClick={() => void importCfg()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              <UploadSimple size={14} weight="bold" />
+              导入配置
+            </button>
+          </div>
+        </section>
+
+        <section className="ws-panel rounded-2xl px-4 py-4 animate-fade-up">
+          <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">资源管理器集成</h2>
+          <p className="mt-1 text-[11.5px] text-[var(--color-ink)]/45">
+            在文件夹右键添加「用净界分析磁盘占用」
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={explorerMenu === true}
+              onClick={() => void toggleExplorerMenu(true)}
+              className="btn-press rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)] disabled:opacity-40"
+            >
+              注册右键菜单
+            </button>
+            <button
+              type="button"
+              disabled={explorerMenu === false}
+              onClick={() => void toggleExplorerMenu(false)}
+              className="btn-press rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)] disabled:opacity-40"
+            >
+              移除
+            </button>
+          </div>
+        </section>
+
+        <section className="ws-panel rounded-2xl px-4 py-4 animate-fade-up">
+          <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">保护路径 Glob</h2>
+          <p className="mt-1 text-[11.5px] text-[var(--color-ink)]/45">
+            文件级模式，如 **\.env、**\secret\**
+          </p>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={globInput}
+              onChange={(e) => setGlobInput(e.target.value)}
+              placeholder="**\node_modules\**"
+              className="min-w-0 flex-1 rounded-xl border border-[var(--color-sand)] bg-white/80 px-3 py-2 text-[12.5px] font-mono outline-none focus:border-[var(--color-sea-bright)]"
+            />
+            <button
+              type="button"
+              onClick={() => void addGlob()}
+              className="btn-press rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              添加
+            </button>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {(config.protectedGlobs ?? []).map((g) => (
+              <li
+                key={g}
+                className="flex items-center gap-2 rounded-lg border border-[var(--color-sand)]/60 px-2 py-1.5 font-mono text-[11px]"
+              >
+                <span className="flex-1 truncate">{g}</span>
+                <button type="button" onClick={() => void removeGlob(g)} className="text-[var(--color-danger)]">
+                  <X size={12} weight="bold" />
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       </div>

@@ -111,6 +111,14 @@ fn default_check_updates() -> bool {
     true
 }
 
+fn default_theme() -> String {
+    "system".into()
+}
+
+fn default_protected_globs() -> Vec<String> {
+    Vec::new()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
@@ -137,6 +145,10 @@ pub struct AppConfig {
     pub run_in_tray: bool,
     #[serde(default = "default_check_updates")]
     pub check_updates_on_start: bool,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default = "default_protected_globs")]
+    pub protected_globs: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -155,6 +167,8 @@ impl Default for AppConfig {
             last_reminder_at: None,
             run_in_tray: true,
             check_updates_on_start: true,
+            theme: default_theme(),
+            protected_globs: Vec::new(),
         }
     }
 }
@@ -188,9 +202,49 @@ pub fn save_config(config: &AppConfig) -> Result<(), String> {
     fs::write(&path, text).map_err(|e| format!("写入配置失败: {e}"))
 }
 
-/// Returns true if `path` is equal to or under any protected path.
-pub fn is_protected(path: &Path, protected: &[String]) -> bool {
-    if protected.is_empty() {
+pub fn export_config_json() -> Result<String, String> {
+    let cfg = load_config();
+    serde_json::to_string_pretty(&cfg).map_err(|e| format!("导出配置失败: {e}"))
+}
+
+pub fn import_config_json(text: &str) -> Result<AppConfig, String> {
+    let cfg: AppConfig =
+        serde_json::from_str(text).map_err(|e| format!("配置格式无效: {e}"))?;
+    save_config(&cfg)?;
+    Ok(cfg)
+}
+
+pub fn import_config_from_path(path: &str) -> Result<AppConfig, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("读取配置失败: {e}"))?;
+    import_config_json(&text)
+}
+
+/// Protected path + glob rules used during scan/clean.
+pub struct ProtectionRules<'a> {
+    pub paths: &'a [String],
+    pub globs: &'a [String],
+}
+
+impl<'a> ProtectionRules<'a> {
+    pub fn from_slices(paths: &'a [String], globs: &'a [String]) -> Self {
+        Self { paths, globs }
+    }
+
+    pub fn from_config(cfg: &'a AppConfig) -> Self {
+        Self {
+            paths: &cfg.protected_paths,
+            globs: &cfg.protected_globs,
+        }
+    }
+
+    pub fn check(&self, path: &Path) -> bool {
+        is_protected(path, self.paths, self.globs)
+    }
+}
+
+/// Returns true if `path` is equal to or under any protected path, or matches a glob.
+fn is_protected(path: &Path, protected: &[String], globs: &[String]) -> bool {
+    if protected.is_empty() && globs.is_empty() {
         return false;
     }
     let path_str = normalize_path_str(&path.to_string_lossy());
@@ -203,7 +257,68 @@ pub fn is_protected(path: &Path, protected: &[String]) -> bool {
             return true;
         }
     }
+    for pattern in globs {
+        if path_matches_glob(&path_str, pattern) {
+            return true;
+        }
+    }
     false
+}
+
+/// Simple glob: `*` any chars except `\`, `**` any path segment, `?` one char.
+pub fn path_matches_glob(path: &str, pattern: &str) -> bool {
+    let path = normalize_path_str(path);
+    let pattern = normalize_path_str(pattern);
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern.contains("**") {
+        let suffix = pattern
+            .split("**")
+            .last()
+            .unwrap_or("")
+            .trim_start_matches('\\');
+        if !suffix.is_empty() && (path.ends_with(suffix) || path.ends_with(&format!("\\{suffix}"))) {
+            return true;
+        }
+        let prefix = pattern
+            .split("**")
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('\\');
+        if !prefix.is_empty() && (path.starts_with(&prefix) || path.starts_with(&format!("{prefix}\\"))) {
+            return true;
+        }
+    }
+    glob_match_impl(path.as_bytes(), pattern.as_bytes())
+}
+
+fn glob_match_impl(path: &[u8], pattern: &[u8]) -> bool {
+    match (path.first(), pattern.first()) {
+        (None, None) => true,
+        (Some(_), None) => pattern == [b'*'],
+        (None, Some(b'*')) => {
+            if pattern.len() > 1 && pattern[1] == b'*' {
+                glob_match_impl(path, &pattern[2..])
+            } else {
+                glob_match_impl(path, &pattern[1..])
+                    || path.first().is_some_and(|&c| c != b'\\')
+                        && glob_match_impl(&path[1..], pattern)
+            }
+        }
+        (Some(p), Some(b'?')) => *p != b'\\' && glob_match_impl(&path[1..], &pattern[1..]),
+        (Some(p), Some(b'*')) => {
+            if pattern.len() > 1 && pattern[1] == b'*' {
+                glob_match_impl(path, &pattern[2..])
+                    || (*p != b'\\' && glob_match_impl(&path[1..], pattern))
+            } else {
+                glob_match_impl(path, &pattern[1..])
+                    || glob_match_impl(&path[1..], pattern)
+            }
+        }
+        (Some(p), Some(g)) if p == g => glob_match_impl(&path[1..], &pattern[1..]),
+        _ => false,
+    }
 }
 
 fn normalize_path_str(s: &str) -> String {
@@ -229,6 +344,7 @@ mod tests {
         assert!(is_protected(
             Path::new(r"D:\Projects\secret"),
             &[r"D:\Projects\secret".into()],
+            &[],
         ));
     }
 
@@ -237,6 +353,7 @@ mod tests {
         assert!(is_protected(
             Path::new(r"D:\Projects\secret\build\out"),
             &[r"D:\Projects\Secret".into()],
+            &[],
         ));
     }
 
@@ -245,6 +362,21 @@ mod tests {
         assert!(!is_protected(
             Path::new(r"D:\Projects\public"),
             &[r"D:\Projects\secret".into()],
+            &[],
+        ));
+    }
+
+    #[test]
+    fn is_protected_glob_wildcard() {
+        assert!(is_protected(
+            Path::new(r"D:\Projects\app\.env"),
+            &[],
+            &[r"**\.env".into()],
+        ));
+        assert!(!is_protected(
+            Path::new(r"D:\Projects\app\readme.txt"),
+            &[],
+            &[r"**\.env".into()],
         ));
     }
 

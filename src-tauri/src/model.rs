@@ -116,6 +116,10 @@ pub struct ScanResult {
     pub items: Vec<ScanItem>,
     pub total_bytes: u64,
     pub scanned_roots: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dup_estimate_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dup_candidate_files: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +196,7 @@ pub struct ScanRequest {
     pub stale_days: Option<u64>,
     pub safe_only: Option<bool>,
     pub protected_paths: Option<Vec<String>>,
+    pub dup_extensions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,4 +381,38 @@ pub struct ContextMenuOptimizeReport {
     pub disabled: Vec<crate::context_menu::ContextMenuItem>,
     pub skipped: Vec<crate::context_menu::ContextMenuItem>,
     pub failed: Vec<StartupFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleReminderPayload {
+    pub estimated_items: usize,
+    pub estimated_bytes: u64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceSuggestion {
+    pub name: String,
+    pub display_name: String,
+    pub state: String,
+    pub start_mode: String,
+    pub hint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WinSxSHint {
+    pub reclaimable_bytes: Option<u64>,
+    pub summary: String,
+    pub raw_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DupScanEstimate {
+    pub candidate_files: usize,
+    pub total_bytes: u64,
+    pub estimated_seconds: u64,
 }

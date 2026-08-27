@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ClockCountdown, MagnifyingGlass, Trash } from "@phosphor-icons/react";
+import { ClockCountdown, DownloadSimple, MagnifyingGlass, Trash } from "@phosphor-icons/react";
 import ConfirmDialog from "./ConfirmDialog";
 import HistoryDetailModal from "./HistoryDetailModal";
 import { closeWithAnimation } from "./motion";
@@ -102,6 +102,22 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
     }
   };
 
+  const exportHistory = async () => {
+    try {
+      const json = await invoke<string>("export_history");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pure-clean-history-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("历史已导出");
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const filters: { id: FilterMode; label: string }[] = [
     { id: "all", label: "全部" },
     { id: "optimize", label: "智能优化" },
@@ -112,11 +128,21 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
     <div className="h-full flex flex-col overflow-hidden">
       <WorkspaceHeader
         title="清理历史"
-        subtitle={`最多保留 50 条 · 当前 ${history.length} 条`}
+        subtitle={`最多保留 200 条 · 当前 ${history.length} 条`}
         icon={<ClockCountdown size={18} weight="duotone" />}
         onBack={onBack}
         actions={
-          <button
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!history.length}
+              onClick={() => void exportHistory()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white/70 px-3 py-1.5 text-[12px] font-medium text-[var(--color-ink)]/70 hover:bg-white disabled:opacity-40"
+            >
+              <DownloadSimple size={14} weight="bold" />
+              导出
+            </button>
+            <button
             type="button"
             disabled={!history.length || clearing}
             onClick={() => {
@@ -128,6 +154,7 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
             <Trash size={14} weight="bold" />
             清空
           </button>
+          </div>
         }
       />
 

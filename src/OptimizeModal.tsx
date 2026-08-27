@@ -108,6 +108,7 @@ export default function OptimizeModal({
   const [expandedFailures, setExpandedFailures] = useState<Set<string>>(
     () => new Set(),
   );
+  const [deepMode, setDeepMode] = useState(false);
   const phaseRef = useRef<Phase>("idle");
   const onFinishedRef = useRef(onFinished);
   const cancelledRef = useRef(false);
@@ -132,7 +133,9 @@ export default function OptimizeModal({
     setExpandedFailures(new Set());
     setProgress({ phase: "scanning", message: "准备开始…" });
     try {
-      const result = await invoke<OptimizeReport>("run_smart_optimize");
+      const result = await invoke<OptimizeReport>("run_smart_optimize", {
+        deep: deepMode,
+      });
       if (cancelledRef.current) return;
       setReport(result);
       setProgress({ phase: "done", message: "体检优化完成" });
@@ -150,7 +153,7 @@ export default function OptimizeModal({
       setError(msg);
       setPhase("error");
     }
-  }, []);
+  }, [deepMode]);
 
   useEffect(() => {
     if (!open) {
@@ -163,21 +166,17 @@ export default function OptimizeModal({
     }
 
     let unsub: (() => void) | undefined;
-    let effectCancelled = false;
 
     (async () => {
       unsub = await listen<OptimizeProgress>("optimize_progress", (e) => {
         if (!cancelledRef.current) setProgress(e.payload);
       });
-      if (effectCancelled || cancelledRef.current) return;
-      void run();
     })();
 
     return () => {
-      effectCancelled = true;
       unsub?.();
     };
-  }, [open, run]);
+  }, [open]);
 
   const requestClose = useCallback(() => {
     const busyNow =
@@ -275,14 +274,39 @@ export default function OptimizeModal({
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 pb-5">
-          {(phase === "idle" || phase === "running" || phase === "done") && (
+          {phase === "idle" && (
+            <div className="space-y-3 animate-fade-up">
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/35 px-3 py-2.5 text-[12.5px]">
+                <input
+                  type="checkbox"
+                  checked={deepMode}
+                  onChange={(e) => setDeepMode(e.target.checked)}
+                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)]"
+                />
+                <span>
+                  <span className="font-medium">深度模式</span>
+                  <span className="mt-0.5 block text-[11px] text-[var(--color-ink)]/45">
+                    额外扫描项目目录中的安全构建产物，耗时更长
+                  </span>
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => void run()}
+                className="btn-press inline-flex items-center gap-2 rounded-xl bg-[var(--color-sea)] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
+              >
+                <Lightning size={16} weight="fill" />
+                开始优化
+              </button>
+            </div>
+          )}
+
+          {(phase === "running" || phase === "done") && (
             <div className="space-y-3 animate-fade-up">
               <div className="flex flex-wrap gap-2">
                 {PHASE_STEPS.map((s, i) => {
                   const done = phase === "done" || i < activeStep;
-                  const current =
-                    (phase === "running" && i === activeStep) ||
-                    (phase === "idle" && i === 0);
+                  const current = phase === "running" && i === activeStep;
                   return (
                     <span
                       key={s.id}
@@ -303,7 +327,7 @@ export default function OptimizeModal({
               <div className="progress-track h-2">
                 <div
                   className="progress-fill"
-                  style={{ width: `${phase === "idle" ? 4 : pct}%` }}
+                  style={{ width: `${pct}%` }}
                 />
               </div>
               <p
