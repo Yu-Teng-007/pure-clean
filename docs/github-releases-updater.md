@@ -9,7 +9,7 @@
 Updater 检查地址（需与 GitHub 仓库路径一致）：
 
 ```text
-https://github.com/yuteng77/pure-clean/releases/latest/download/latest.json
+https://github.com/Yu-Teng-007/pure-clean/releases/latest/download/latest.json
 ```
 
 ---
@@ -18,7 +18,7 @@ https://github.com/yuteng77/pure-clean/releases/latest/download/latest.json
 
 当前本地 `origin` 指向 Gitee，需额外添加 **GitHub 远程** 并推送。
 
-1. 在 GitHub 新建空仓库 **`yuteng77/pure-clean`**（建议不勾选「Initialize with README」，避免首次推送冲突）
+1. 在 GitHub 新建空仓库 **`Yu-Teng-007/pure-clean`**（建议不勾选「Initialize with README」，避免首次推送冲突）
 2. 在本机执行初始化脚本（会自动添加 `github` 远程、检查密钥、可选首次推送）：
 
 ```powershell
@@ -29,7 +29,7 @@ npm run release:setup
 
 ```bash
 cd d:\MYCode\pure-clean
-git remote add github https://github.com/yuteng77/pure-clean.git
+git remote add github https://github.com/Yu-Teng-007/pure-clean.git
 git push github master
 ```
 

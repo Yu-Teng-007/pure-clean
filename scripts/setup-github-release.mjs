@@ -13,7 +13,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const DEFAULT_REPO = "yuteng77/pure-clean";
+const DEFAULT_REPO = "Yu-Teng-007/pure-clean";
 const DEFAULT_REMOTE = "github";
 const KEY_PATH = join(root, "src-tauri", ".tauri", "updater.key");
 const PUB_PATH = join(root, "src-tauri", ".tauri", "updater.key.pub");

@@ -8,7 +8,7 @@
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 #     若生成密钥时未设密码，留空或填任意占位（workflow 中可为 ""）
 #
-# 仓库需先创建 GitHub 镜像：github.com/yuteng77/pure-clean
+# 仓库需先创建 GitHub 镜像：github.com/Yu-Teng-007/pure-clean
 # 若路径不同，请同步修改 tauri.conf.json 中的 updater.endpoints
 
 name: Release
