@@ -17,7 +17,9 @@ use crate::model::{
 };
 use crate::process_lock;
 use crate::recycle_restore;
+use crate::scheduler;
 use crate::scan;
+use crate::elevation;
 use crate::context_menu::{self, ContextMenuItem};
 use crate::startup::{self, StartupItem};
 
@@ -596,4 +598,34 @@ fn run_smart_optimize_inner(app: &AppHandle) -> Result<OptimizeReport, String> {
         dry_run: clean_report.dry_run,
         to_recycle_bin: clean_report.to_recycle_bin,
     })
+}
+
+#[tauri::command]
+pub fn is_elevated() -> bool {
+    elevation::is_elevated()
+}
+
+#[tauri::command]
+pub fn restart_as_admin() -> Result<(), String> {
+    elevation::restart_as_admin()
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<String, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| format!("更新组件不可用: {e}"))?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(format!(
+            "发现新版本 {}（当前 {}）",
+            update.version,
+            update.current_version
+        )),
+        Ok(None) => Ok("当前已是最新版本".into()),
+        Err(e) => Err(format!("检查更新失败: {e}")),
+    }
+}
+
+#[tauri::command]
+pub fn trigger_cleanup_reminder(app: AppHandle) -> Result<bool, String> {
+    scheduler::check_and_notify(&app, true)
 }

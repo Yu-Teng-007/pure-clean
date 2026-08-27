@@ -91,6 +91,26 @@ fn default_recycle() -> bool {
     false
 }
 
+fn default_schedule_enabled() -> bool {
+    false
+}
+
+fn default_schedule_days() -> u64 {
+    7
+}
+
+fn default_schedule_hour() -> u32 {
+    10
+}
+
+fn default_run_in_tray() -> bool {
+    true
+}
+
+fn default_check_updates() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
@@ -105,6 +125,18 @@ pub struct AppConfig {
     pub protected_paths: Vec<String>,
     #[serde(default = "default_recycle")]
     pub to_recycle_bin_by_default: bool,
+    #[serde(default = "default_schedule_enabled")]
+    pub schedule_reminder_enabled: bool,
+    #[serde(default = "default_schedule_days")]
+    pub schedule_reminder_days: u64,
+    #[serde(default = "default_schedule_hour")]
+    pub schedule_reminder_hour: u32,
+    #[serde(default)]
+    pub last_reminder_at: Option<String>,
+    #[serde(default = "default_run_in_tray")]
+    pub run_in_tray: bool,
+    #[serde(default = "default_check_updates")]
+    pub check_updates_on_start: bool,
 }
 
 impl Default for AppConfig {
@@ -117,6 +149,12 @@ impl Default for AppConfig {
             stale_days: DEFAULT_STALE_DAYS,
             protected_paths: Vec::new(),
             to_recycle_bin_by_default: false,
+            schedule_reminder_enabled: false,
+            schedule_reminder_days: 7,
+            schedule_reminder_hour: 10,
+            last_reminder_at: None,
+            run_in_tray: true,
+            check_updates_on_start: true,
         }
     }
 }

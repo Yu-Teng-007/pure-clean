@@ -31,6 +31,8 @@ export function locationLabel(location: string): string {
       return "用户 Startup 文件夹";
     case "folder_common":
       return "公共 Startup 文件夹";
+    case "task_scheduler":
+      return "任务计划程序";
     default:
       return location;
   }

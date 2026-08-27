@@ -1364,7 +1364,7 @@ pub fn make_file_or_dir_item(
     }
 }
 
-fn file_content_hash(path: &Path) -> Option<String> {
+fn file_content_hash_full(path: &Path) -> Option<String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path).ok()?;
     let mut hasher = Sha256::new();
@@ -1376,6 +1376,30 @@ fn file_content_hash(path: &Path) -> Option<String> {
         }
         hasher.update(&buf[..n]);
     }
+    Some(hex::encode(hasher.finalize()))
+}
+
+/// Fast fingerprint: size + head/tail chunks — used to narrow candidates before full hash.
+fn file_sample_hash(path: &Path, size: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    const CHUNK: u64 = 64 * 1024;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(size.to_le_bytes());
+
+    let mut head = vec![0u8; CHUNK.min(size) as usize];
+    let head_len = file.read(&mut head).ok()?;
+    hasher.update(&head[..head_len]);
+
+    if size > CHUNK {
+        let tail_len = CHUNK.min(size) as usize;
+        let mut tail = vec![0u8; tail_len];
+        let start = size.saturating_sub(CHUNK);
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let read = file.read(&mut tail).ok()?;
+        hasher.update(&tail[..read]);
+    }
+
     Some(hex::encode(hasher.finalize()))
 }
 
@@ -1401,13 +1425,14 @@ fn should_skip_file_scan_dir(name: &str) -> bool {
         .any(|s| s.eq_ignore_ascii_case(name))
 }
 
-/// Find duplicate files by size then content hash. Keep the oldest path; select copies.
+/// Find duplicate files by size, sample hash, then full hash. Keep the oldest path; select copies.
 pub fn scan_duplicate_files(
     root: &Path,
     min_bytes: u64,
     max_depth: usize,
     on_progress: &mut dyn FnMut(&str) -> bool,
 ) -> Vec<ScanItem> {
+    use rayon::prelude::*;
     use std::collections::HashMap;
 
     let mut by_size: HashMap<u64, Vec<PathBuf>> = HashMap::new();
@@ -1457,48 +1482,73 @@ pub fn scan_duplicate_files(
         if paths.len() < 2 {
             continue;
         }
-        let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        for path in paths {
+
+        let samples: Vec<(PathBuf, String)> = paths
+            .par_iter()
+            .filter_map(|path| {
+                file_sample_hash(path, size).map(|hash| (path.clone(), hash))
+            })
+            .collect();
+
+        let mut by_sample: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for (path, hash) in samples {
             if !on_progress(&path.to_string_lossy()) {
                 break 'dupe_groups;
             }
-            if let Some(hash) = file_content_hash(&path) {
-                by_hash.entry(hash).or_default().push(path);
-            }
+            by_sample.entry(hash).or_default().push(path);
         }
-        for (hash, mut group) in by_hash {
-            if group.len() < 2 {
+
+        for sample_paths in by_sample.values() {
+            if sample_paths.len() < 2 {
                 continue;
             }
-            group.sort_by(|a, b| {
-                let ta = std::fs::metadata(a)
-                    .and_then(|m| m.modified())
-                    .ok();
-                let tb = std::fs::metadata(b)
-                    .and_then(|m| m.modified())
-                    .ok();
-                match (ta, tb) {
-                    (Some(x), Some(y)) => x.cmp(&y),
-                    _ => a.cmp(b),
+            let mut by_hash: HashMap<String, Vec<PathBuf>> = HashMap::new();
+            let full_hashes: Vec<(PathBuf, String)> = sample_paths
+                .par_iter()
+                .filter_map(|path| {
+                    file_content_hash_full(path).map(|hash| (path.clone(), hash))
+                })
+                .collect();
+            for (path, hash) in full_hashes {
+                if !on_progress(&path.to_string_lossy()) {
+                    break 'dupe_groups;
                 }
-            });
-            let group_id = format!("dupe:{}", &hash[..16.min(hash.len())]);
-            for (idx, path) in group.into_iter().enumerate() {
-                let path_str = path.to_string_lossy().to_string();
-                let is_keeper = idx == 0;
-                items.push(ScanItem {
-                    id: item_id(&path_str),
-                    category_label: Category::DuplicateFiles.label().to_string(),
-                    category: Category::DuplicateFiles,
-                    path: path_str,
-                    bytes: size,
-                    risk: Risk::Caution,
-                    selected_by_default: !is_keeper,
-                    special: None,
-                    group_id: Some(group_id.clone()),
-                    is_keeper: Some(is_keeper),
-                    hint: None,
+                by_hash.entry(hash).or_default().push(path);
+            }
+            for (hash, mut group) in by_hash {
+                if group.len() < 2 {
+                    continue;
+                }
+                group.sort_by(|a, b| {
+                    let ta = std::fs::metadata(a)
+                        .and_then(|m| m.modified())
+                        .ok();
+                    let tb = std::fs::metadata(b)
+                        .and_then(|m| m.modified())
+                        .ok();
+                    match (ta, tb) {
+                        (Some(x), Some(y)) => x.cmp(&y),
+                        _ => a.cmp(b),
+                    }
                 });
+                let group_id = format!("dupe:{}", &hash[..16.min(hash.len())]);
+                for (idx, path) in group.into_iter().enumerate() {
+                    let path_str = path.to_string_lossy().to_string();
+                    let is_keeper = idx == 0;
+                    items.push(ScanItem {
+                        id: item_id(&path_str),
+                        category_label: Category::DuplicateFiles.label().to_string(),
+                        category: Category::DuplicateFiles,
+                        path: path_str,
+                        bytes: size,
+                        risk: Risk::Caution,
+                        selected_by_default: !is_keeper,
+                        special: None,
+                        group_id: Some(group_id.clone()),
+                        is_keeper: Some(is_keeper),
+                        hint: None,
+                    });
+                }
             }
         }
     }

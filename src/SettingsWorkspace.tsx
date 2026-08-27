@@ -2,11 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  ArrowsClockwise,
+  Bell,
   FolderSimplePlus,
   GearSix,
   HardDrives,
   Recycle,
+  ShieldCheck,
   ShieldWarning,
+  Tray,
   Trash,
   Wrench,
   X,
@@ -38,14 +42,18 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
   const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(
     {},
   );
+  const [elevated, setElevated] = useState<boolean | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [cfg, categories] = await Promise.all([
+      const [cfg, categories, isAdmin] = await Promise.all([
         invoke<AppConfig>("load_config"),
         invoke<Array<{ id: string; label: string }>>("get_categories"),
+        invoke<boolean>("is_elevated"),
       ]);
       setConfig(cfg);
+      setElevated(isAdmin);
       setCategoryLabels(
         Object.fromEntries(categories.map((c) => [c.id, c.label])),
       );
@@ -157,6 +165,37 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
     await persist({ ...config, enabledCategories: [...CATEGORY_ORDER] });
   };
 
+  const restartAsAdmin = async () => {
+    try {
+      await invoke("restart_as_admin");
+    } catch (e) {
+      setError(String(e));
+      showToast(String(e));
+    }
+  };
+
+  const checkUpdates = async () => {
+    setUpdateStatus("检查中…");
+    try {
+      const msg = await invoke<string>("check_for_updates");
+      setUpdateStatus(msg);
+      showToast(msg);
+    } catch (e) {
+      const err = String(e);
+      setUpdateStatus(err);
+      showToast(err);
+    }
+  };
+
+  const testReminder = async () => {
+    try {
+      await invoke("trigger_cleanup_reminder");
+      showToast("已发送测试提醒");
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <WorkspaceHeader
@@ -225,6 +264,198 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
                 </span>
               </span>
             </label>
+          </div>
+        </section>
+
+        <section
+          className="ws-panel rounded-2xl px-4 py-4 animate-fade-up"
+          style={{ animationDelay: "20ms" }}
+        >
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={15} weight="duotone" className="text-[var(--color-sea)]" />
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+              管理员权限
+            </h2>
+          </div>
+          <p className="mt-1 text-[11.5px] text-[var(--color-ink)]/45">
+            以管理员身份运行可清理系统缓存、深度刷新内存待机列表，并修改本机注册表开机项
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span
+              className={[
+                "inline-flex items-center rounded-lg px-2.5 py-1 text-[11.5px] font-medium",
+                elevated
+                  ? "bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                  : "bg-amber-500/10 text-[var(--color-warn)]",
+              ].join(" ")}
+            >
+              {elevated === null
+                ? "检测中…"
+                : elevated
+                  ? "当前已以管理员身份运行"
+                  : "当前为普通用户权限"}
+            </span>
+            {!elevated && (
+              <button
+                type="button"
+                onClick={() => void restartAsAdmin()}
+                className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] px-3 py-2 text-[12px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
+              >
+                以管理员身份重启
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section
+          className="ws-panel rounded-2xl px-4 py-4 animate-fade-up"
+          style={{ animationDelay: "30ms" }}
+        >
+          <div className="flex items-center gap-2">
+            <Tray size={15} weight="duotone" className="text-[var(--color-sea)]" />
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+              托盘与提醒
+            </h2>
+          </div>
+          <div className="mt-3 space-y-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                checked={config.runInTray ?? true}
+                disabled={saving}
+                onChange={(e) =>
+                  void persist({ ...config, runInTray: e.target.checked })
+                }
+                className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)]"
+              />
+              <span>
+                <span className="font-medium">关闭时最小化到托盘</span>
+                <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                  点击关闭按钮时隐藏窗口，可从系统托盘重新打开
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                checked={config.scheduleReminderEnabled ?? false}
+                disabled={saving}
+                onChange={(e) =>
+                  void persist({
+                    ...config,
+                    scheduleReminderEnabled: e.target.checked,
+                  })
+                }
+                className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)]"
+              />
+              <span>
+                <span className="font-medium">定期清理提醒</span>
+                <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                  按设定间隔在指定小时后发送系统通知
+                </span>
+              </span>
+            </label>
+            {config.scheduleReminderEnabled && (
+              <div className="flex flex-wrap items-center gap-2 pl-6">
+                <span className="text-[12px] text-[var(--color-ink)]/55">每</span>
+                {[3, 7, 14, 30].map((days) => (
+                  <button
+                    key={days}
+                    type="button"
+                    disabled={saving}
+                    onClick={() =>
+                      void persist({ ...config, scheduleReminderDays: days })
+                    }
+                    className={[
+                      "btn-press rounded-xl px-2.5 py-1 text-xs font-medium border",
+                      (config.scheduleReminderDays ?? 7) === days
+                        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70",
+                    ].join(" ")}
+                  >
+                    {days} 天
+                  </button>
+                ))}
+                <span className="text-[12px] text-[var(--color-ink)]/55">·</span>
+                <span className="text-[12px] text-[var(--color-ink)]/55">自</span>
+                {[9, 10, 12, 18].map((hour) => (
+                  <button
+                    key={hour}
+                    type="button"
+                    disabled={saving}
+                    onClick={() =>
+                      void persist({ ...config, scheduleReminderHour: hour })
+                    }
+                    className={[
+                      "btn-press rounded-xl px-2.5 py-1 text-xs font-medium border",
+                      (config.scheduleReminderHour ?? 10) === hour
+                        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
+                        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70",
+                    ].join(" ")}
+                  >
+                    {hour}:00
+                  </button>
+                ))}
+                <span className="text-[12px] text-[var(--color-ink)]/55">起可提醒</span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => void testReminder()}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              <Bell size={14} weight="duotone" />
+              发送测试提醒
+            </button>
+          </div>
+        </section>
+
+        <section
+          className="ws-panel rounded-2xl px-4 py-4 animate-fade-up"
+          style={{ animationDelay: "35ms" }}
+        >
+          <div className="flex items-center gap-2">
+            <ArrowsClockwise size={15} weight="duotone" className="text-[var(--color-sea)]" />
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+              软件更新
+            </h2>
+          </div>
+          <div className="mt-3 space-y-3">
+            <label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                checked={config.checkUpdatesOnStart ?? true}
+                disabled={saving}
+                onChange={(e) =>
+                  void persist({
+                    ...config,
+                    checkUpdatesOnStart: e.target.checked,
+                  })
+                }
+                className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)]"
+              />
+              <span>
+                <span className="font-medium">启动时检查更新</span>
+                <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                  需在发布时配置更新服务器后生效
+                </span>
+              </span>
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void checkUpdates()}
+                className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+              >
+                <ArrowsClockwise size={14} weight="bold" />
+                立即检查更新
+              </button>
+              {updateStatus && (
+                <span className="text-[11.5px] text-[var(--color-ink)]/55">
+                  {updateStatus}
+                </span>
+              )}
+            </div>
           </div>
         </section>
 

@@ -22,6 +22,7 @@ import {
   type MemorySnapshot,
   type ProcessMemoryItem,
 } from "./types";
+import { showToast } from "./Toast";
 
 interface MemoryWorkspaceProps {
   onBack: () => void;
@@ -85,6 +86,7 @@ export default function MemoryWorkspace({ onBack }: MemoryWorkspaceProps) {
   const [report, setReport] = useState<MemoryCleanReport | null>(null);
   const [cleanError, setCleanError] = useState<string | null>(null);
   const [beforeSnap, setBeforeSnap] = useState<MemorySnapshot | null>(null);
+  const [elevated, setElevated] = useState<boolean | null>(null);
   const cleaningRef = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -115,6 +117,9 @@ export default function MemoryWorkspace({ onBack }: MemoryWorkspaceProps) {
 
   useEffect(() => {
     void refresh();
+    void invoke<boolean>("is_elevated")
+      .then(setElevated)
+      .catch(() => setElevated(null));
   }, [refresh]);
 
   // 弹窗清理进行中：阶段 + 进度
@@ -457,9 +462,22 @@ export default function MemoryWorkspace({ onBack }: MemoryWorkspaceProps) {
           )}
         </section>
 
-        <p className="px-1 text-[11px] leading-relaxed text-[var(--color-ink)]/40">
-          压缩工作集不会结束进程，仅将未活跃页退回系统；部分受保护进程可能失败。深度清理待机列表通常需要管理员权限。
-        </p>
+        <div className="px-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-relaxed text-[var(--color-ink)]/40">
+          <p>
+            压缩工作集不会结束进程，仅将未活跃页退回系统；部分受保护进程可能失败。深度清理待机列表通常需要管理员权限。
+          </p>
+          {elevated === false && (
+            <button
+              type="button"
+              onClick={() =>
+                void invoke("restart_as_admin").catch((e) => showToast(String(e)))
+              }
+              className="btn-press shrink-0 text-[11px] font-medium text-[var(--color-sea)] hover:underline"
+            >
+              以管理员身份重启
+            </button>
+          )}
+        </div>
         </div>
 
         <ScrollEdgeFabs

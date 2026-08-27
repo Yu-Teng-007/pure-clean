@@ -3,6 +3,7 @@ mod clean;
 mod commands;
 mod config;
 mod drives;
+mod elevation;
 mod hardware;
 mod history;
 mod memory;
@@ -10,15 +11,31 @@ mod model;
 mod process_lock;
 mod recycle_restore;
 mod scan;
+mod scheduler;
 mod context_menu;
 mod startup;
 mod system_tools;
+mod tray;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            tray::setup_tray(app)?;
+            scheduler::start(app.handle().clone());
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::handle_close_to_tray(window) {
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_default_roots,
             commands::get_categories,
@@ -53,6 +70,10 @@ pub fn run() {
             commands::list_memory_processes,
             commands::clean_memory,
             commands::trim_process_working_set,
+            commands::is_elevated,
+            commands::restart_as_admin,
+            commands::check_for_updates,
+            commands::trigger_cleanup_reminder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running 净界");

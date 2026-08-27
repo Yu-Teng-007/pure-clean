@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { AppTool, AppView, CleanBack } from "./appView";
 import ContextMenuWorkspace from "./ContextMenuWorkspace";
 import CleanToolsHub from "./CleanToolsHub";
@@ -12,8 +14,9 @@ import DiskAnalyzerWorkspace from "./DiskAnalyzerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
 import StartupWorkspace from "./StartupWorkspace";
 import TitleBar from "./TitleBar";
-import ToastHost from "./Toast";
+import ToastHost, { showToast } from "./Toast";
 import type { CleanMode } from "./modes";
+import type { AppConfig } from "./types";
 
 export default function App() {
   const [view, setView] = useState<AppView>(null);
@@ -54,6 +57,33 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [view, backFromClean, goHome]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      unlisten = await listen("schedule_reminder", () => {
+        showToast("磁盘缓存可能已累积，建议运行一次扫描");
+      });
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await invoke<AppConfig>("load_config");
+        if (!cfg.checkUpdatesOnStart) return;
+        const msg = await invoke<string>("check_for_updates");
+        if (msg.includes("发现新版本")) {
+          showToast(msg);
+        }
+      } catch {
+        /* updater not configured or network unavailable */
+      }
+    })();
+  }, []);
 
   return (
     <div className="h-full flex flex-col">

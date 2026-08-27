@@ -36,6 +36,7 @@ const GROUP_ORDER: StartupLocation[] = [
   "registry_hklm",
   "folder_user",
   "folder_common",
+  "task_scheduler",
 ];
 
 const MODAL_OUT_MS = 180;

@@ -9,6 +9,7 @@ use winreg::RegKey;
 use crate::config;
 
 pub(crate) mod icon;
+pub(crate) mod tasks;
 
 const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const DISABLED_EXT: &str = ".pcoff";
@@ -20,6 +21,7 @@ pub enum StartupLocation {
     RegistryHklm,
     FolderUser,
     FolderCommon,
+    TaskScheduler,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,11 +106,21 @@ fn make_id(location: &StartupLocation, name: &str) -> String {
         StartupLocation::RegistryHklm => "hklm",
         StartupLocation::FolderUser => "folder_user",
         StartupLocation::FolderCommon => "folder_common",
+        StartupLocation::TaskScheduler => "task",
     };
+    if matches!(location, StartupLocation::TaskScheduler) {
+        return tasks::make_task_id(name);
+    }
     format!("{loc}|{name}")
 }
 
 pub fn parse_id(id: &str) -> Result<(StartupLocation, String), String> {
+    if let Some(name) = id.strip_prefix("task|") {
+        if name.is_empty() {
+            return Err("开机项名称为空".into());
+        }
+        return Ok((StartupLocation::TaskScheduler, name.to_string()));
+    }
     let (loc, name) = id
         .split_once('|')
         .ok_or_else(|| "无效的开机项 id".to_string())?;
@@ -125,7 +137,7 @@ pub fn parse_id(id: &str) -> Result<(StartupLocation, String), String> {
     Ok((location, name.to_string()))
 }
 
-fn score_impact(name: &str, command: &str) -> (StartupImpact, bool, Option<String>) {
+pub(crate) fn score_impact(name: &str, command: &str) -> (StartupImpact, bool, Option<String>) {
     let hay = format!("{name} {command}").to_ascii_lowercase();
 
     // Conservative keep-list: system / security / common OEM trays.
@@ -355,6 +367,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
     list_disabled_registry(&mut items);
     list_folder(StartupLocation::FolderUser, &mut items);
     list_folder(StartupLocation::FolderCommon, &mut items);
+    items.extend(tasks::list_task_scheduler_items());
     items.sort_by(|a, b| {
         a.location
             .cmp_loc()
@@ -371,6 +384,7 @@ impl StartupLocation {
             StartupLocation::RegistryHklm => 1,
             StartupLocation::FolderUser => 2,
             StartupLocation::FolderCommon => 3,
+            StartupLocation::TaskScheduler => 4,
         }
     }
 }
@@ -464,6 +478,9 @@ pub fn set_startup_enabled(id: &str, enabled: bool) -> Result<StartupItem, Strin
             } else {
                 disable_folder(location.clone(), &name)?;
             }
+        }
+        StartupLocation::TaskScheduler => {
+            tasks::set_task_enabled(&name, enabled)?;
         }
     }
 

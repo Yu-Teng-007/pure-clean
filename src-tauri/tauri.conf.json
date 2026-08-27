@@ -31,6 +31,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "active": false,
+      "dialog": false,
+      "endpoints": [],
+      "pubkey": ""
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

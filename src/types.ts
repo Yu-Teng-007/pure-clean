@@ -268,7 +268,8 @@ export type StartupLocation =
   | "registry_hkcu"
   | "registry_hklm"
   | "folder_user"
-  | "folder_common";
+  | "folder_common"
+  | "task_scheduler";
 
 export type StartupImpact = "low" | "medium" | "high";
 
@@ -363,6 +364,12 @@ export interface AppConfig {
   staleDays: number;
   protectedPaths: string[];
   toRecycleBinByDefault: boolean;
+  scheduleReminderEnabled: boolean;
+  scheduleReminderDays: number;
+  scheduleReminderHour: number;
+  lastReminderAt?: string | null;
+  runInTray: boolean;
+  checkUpdatesOnStart: boolean;
 }
 
 export function formatBytes(bytes: number): string {

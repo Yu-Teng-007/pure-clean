@@ -4,15 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   CaretDown,
-  Copy,
-  FolderOpen,
-  FolderSimplePlus,
   MagnifyingGlass,
   ShieldWarning,
   SortDescending,
   X,
 } from "@phosphor-icons/react";
-import { copyText } from "./clipboard";
 import { MODAL_OUT_MS, closeWithAnimation, prefersReducedMotion } from "./motion";
 import { showToast } from "./Toast";
 import { useKeyboardShortcut } from "./useKeyboardShortcut";
@@ -22,21 +18,29 @@ import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
 import CleanProgressModal, { type DiskCleanPhase } from "./CleanProgressModal";
 import WorkspaceHeader from "./WorkspaceHeader";
+import CleanItemRow from "./cleanWorkspace/CleanItemRow";
+import CleanScanPanel from "./cleanWorkspace/CleanScanPanel";
+import {
+  chipClass,
+  defaultThresholdBytes,
+  EXIT_MS,
+  isSelectable,
+  matchItemByPath,
+  riskClass,
+  riskLabel,
+  SORT_PREF_KEY,
+  thresholdPresets,
+} from "./cleanWorkspace/helpers";
+import { useAnimatedNumber } from "./cleanWorkspace/useAnimatedNumber";
 import {
   AppConfig,
   CATEGORY_ORDER,
   Category,
   CleanProgress,
   CleanReport,
-  DEFAULT_DUPE_MIN_BYTES,
-  DEFAULT_INSTALLER_MIN_BYTES,
   DEFAULT_MIN_FILE_BYTES,
   DEFAULT_STALE_DAYS,
-  DUPE_MIN_PRESETS,
   formatBytes,
-  INSTALLER_MIN_PRESETS,
-  MIN_FILE_PRESETS,
-  STALE_DAY_PRESETS,
   ScanItem,
   ScanProgress,
   ScanResult,
@@ -44,119 +48,6 @@ import {
 } from "./types";
 
 type Phase = "idle" | "scanning" | "ready" | "cleaning" | "done";
-
-const EXIT_MS = 380;
-const SORT_PREF_KEY = "pure-clean-sort-by-size";
-
-function isFilesystemPath(path: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(path.trim()) || path.startsWith("\\\\");
-}
-
-function riskLabel(risk: ScanItem["risk"]): string {
-  switch (risk) {
-    case "safe":
-      return "安全";
-    case "caution":
-      return "谨慎";
-    case "dangerous":
-      return "高风险";
-  }
-}
-
-function riskClass(risk: ScanItem["risk"]): string {
-  switch (risk) {
-    case "safe":
-      return "text-[var(--color-sea)] bg-[var(--color-sea)]/10";
-    case "caution":
-      return "text-[var(--color-warn)] bg-amber-500/10";
-    case "dangerous":
-      return "text-[var(--color-danger)] bg-red-500/10";
-  }
-}
-
-function scanHintClass(hint: string): string {
-  if (hint.includes("请勿删除") || hint.includes("不可")) {
-    return "text-[var(--color-warn)]";
-  }
-  return "text-[var(--color-ink)]/48";
-}
-
-function defaultThresholdBytes(mode: CleanMode): number {
-  const kind = MODES[mode].thresholdKind;
-  if (kind === "dupes") return DEFAULT_DUPE_MIN_BYTES;
-  if (kind === "installers") return DEFAULT_INSTALLER_MIN_BYTES;
-  return DEFAULT_MIN_FILE_BYTES;
-}
-
-function thresholdPresets(mode: CleanMode) {
-  const kind = MODES[mode].thresholdKind;
-  if (kind === "dupes") return DUPE_MIN_PRESETS;
-  if (kind === "installers") return INSTALLER_MIN_PRESETS;
-  return MIN_FILE_PRESETS;
-}
-
-function thresholdLabel(mode: CleanMode): string {
-  const kind = MODES[mode].thresholdKind;
-  if (kind === "dupes") return "最小文件大小";
-  if (kind === "installers") return "最小体积";
-  return "大文件阈值";
-}
-
-function useAnimatedNumber(target: number, duration = 420): number {
-  const [value, setValue] = useState(target);
-  const valueRef = useRef(target);
-
-  useEffect(() => {
-    valueRef.current = value;
-  }, [value]);
-
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      setValue(target);
-      return;
-    }
-    const from = valueRef.current;
-    const delta = target - from;
-    if (delta === 0) return;
-
-    let raf = 0;
-    const t0 = performance.now();
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / duration);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const next = Math.round(from + delta * eased);
-      setValue(next);
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [target, duration]);
-
-  return value;
-}
-
-function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined {
-  return items.find(
-    (i) =>
-      i.path === path ||
-      (i.special === "recycle_bin" &&
-        (path === "回收站" || path.includes("回收站"))) ||
-      (i.special === "docker_prune" &&
-        (path === "docker_prune" ||
-          path.includes("Docker") ||
-          path.toLowerCase().includes("docker"))) ||
-      (i.special === "open_disk_cleanup" &&
-        (path.includes("WinSxS") || path.includes("磁盘清理"))),
-  );
-}
-
-function isAdvisoryOnly(item: ScanItem): boolean {
-  return item.special === "advisory_only";
-}
-
-function isSelectable(item: ScanItem): boolean {
-  return !isAdvisoryOnly(item);
-}
 
 interface CleanWorkspaceProps {
   mode: CleanMode;
@@ -893,133 +784,22 @@ export default function CleanWorkspace({
     (phase === "ready" || phase === "done") &&
     items.some((i) => !goneIds.has(i.id));
 
-  const chipClass = (active: boolean) =>
-    [
-      "btn-press rounded-xl px-2.5 py-1 text-xs font-medium border transition-colors duration-150 disabled:opacity-50",
-      active
-        ? "border-[var(--color-sea)] bg-[var(--color-sea)]/10 text-[var(--color-sea)]"
-        : "border-[var(--color-sand)] bg-white text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]",
-    ].join(" ");
-
   const renderItemRow = (item: ScanItem) => {
     const idx = rowIndex++;
-    const isExiting = exitingIds.has(item.id);
-    const isCleaning = phase === "cleaning" && activeCleanId === item.id;
-    const isSelected = selected.has(item.id);
-    const advisory = isAdvisoryOnly(item);
-    const opensTool = item.special === "open_disk_cleanup";
-    const canReveal = isFilesystemPath(item.path);
     return (
-      <li
+      <CleanItemRow
         key={`${listEpoch}-${item.id}`}
-        className={[
-          "ws-row flex items-start gap-3 px-3.5 py-2.5 transition-[background-color] duration-150",
-          isExiting ? "animate-row-exit" : "animate-row-enter hover:bg-white/70",
-          isCleaning ? "animate-row-cleaning" : "",
-          phase === "cleaning" && isSelected && !isCleaning ? "opacity-70" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        style={
-          isExiting
-            ? undefined
-            : { animationDelay: `${Math.min(idx, 24) * 28}ms` }
-        }
-      >
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => toggleItem(item.id)}
-          disabled={phase === "cleaning" || isExiting || advisory}
-          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90 disabled:opacity-40"
-        />
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={[
-                "text-[13px] font-mono truncate transition-colors duration-200",
-                isCleaning
-                  ? "text-[var(--color-sea)]"
-                  : isExiting
-                    ? "line-through text-[var(--color-ink)]/35"
-                    : "text-[var(--color-ink)]/85",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              title={item.path}
-            >
-              {item.path}
-            </span>
-            <span
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${riskClass(item.risk)}`}
-            >
-              {riskLabel(item.risk)}
-            </span>
-            {item.isKeeper === true && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
-                保留
-              </span>
-            )}
-            {item.isKeeper === false && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/10 text-[var(--color-warn)]">
-                副本
-              </span>
-            )}
-            {advisory && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-ink)]/8 text-[var(--color-ink)]/55">
-                仅检测
-              </span>
-            )}
-            {opensTool && (
-              <button
-                type="button"
-                onClick={() => void openDiskCleanup()}
-                disabled={phase === "cleaning"}
-                className="btn-press text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-sea)]/10 text-[var(--color-sea)] hover:underline disabled:opacity-40"
-              >
-                打开磁盘清理
-              </button>
-            )}
-            {isCleaning && (
-              <span className="text-[10px] font-medium text-[var(--color-sea-bright)] animate-pulse-soft">
-                清理中
-              </span>
-            )}
-          </div>
-          {item.hint && (
-            <p className={`mt-0.5 text-[11px] leading-snug ${scanHintClass(item.hint)}`}>
-              {item.hint}
-            </p>
-          )}
-        </div>
-        <div className="ws-row-actions flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => void copyText(item.path, "路径已复制")}
-            disabled={phase === "cleaning" || isExiting}
-            className="btn-press rounded-lg p-1.5 text-[var(--color-ink)]/40 hover:bg-white hover:text-[var(--color-sea)] disabled:opacity-30"
-            title="复制路径"
-            aria-label="复制路径"
-          >
-            <Copy size={13} weight="bold" />
-          </button>
-          {canReveal && (
-            <button
-              type="button"
-              onClick={() => void revealInExplorer(item.path)}
-              disabled={phase === "cleaning" || isExiting}
-              className="btn-press rounded-lg p-1.5 text-[var(--color-ink)]/40 hover:bg-white hover:text-[var(--color-sea)] disabled:opacity-30"
-              title="在资源管理器中显示"
-              aria-label="在资源管理器中显示"
-            >
-              <FolderOpen size={13} weight="bold" />
-            </button>
-          )}
-        </div>
-        <span className="text-[13px] font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/55">
-          {formatBytes(item.bytes)}
-        </span>
-      </li>
+        item={item}
+        listEpoch={listEpoch}
+        phase={phase}
+        isExiting={exitingIds.has(item.id)}
+        isCleaning={phase === "cleaning" && activeCleanId === item.id}
+        isSelected={selected.has(item.id)}
+        animationIndex={idx}
+        onToggle={toggleItem}
+        onOpenDiskCleanup={() => void openDiskCleanup()}
+        onReveal={(path) => void revealInExplorer(path)}
+      />
     );
   };
 
@@ -1055,197 +835,25 @@ export default function CleanWorkspace({
         }
       />
 
-      <section
-        className="px-7 pb-4 animate-fade-up"
-        style={{ animationDelay: "50ms" }}
-      >
-        <div className="ws-panel rounded-2xl p-4">
-          {meta.needsRoots && (
-            <>
-              <div className="flex flex-wrap gap-2 items-center">
-                <input
-                  value={rootInput}
-                  onChange={(e) => setRootInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && void addRoot()}
-                  placeholder="添加扫描根目录，如 D:\Projects"
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  className="home-input flex-1 min-w-[200px] rounded-xl border border-[var(--color-sand)] bg-white/85 px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
-                />
-                <button
-                  type="button"
-                  onClick={() => void addRoot()}
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-sm font-medium hover:bg-[var(--color-mist)] disabled:opacity-50"
-                >
-                  <FolderSimplePlus size={15} weight="bold" />
-                  添加
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void startScan()}
-                  disabled={!canScan}
-                  className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
-                >
-                  <MagnifyingGlass size={15} weight="bold" />
-                  {phase === "scanning" ? "扫描中…" : "开始扫描"}
-                </button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {roots.map((r) => (
-                  <span
-                    key={r}
-                    className="inline-flex max-w-full items-center gap-2 rounded-xl bg-[var(--color-mist)] px-3 py-1.5 text-xs font-mono text-[var(--color-ink)]/80"
-                  >
-                    <span className="truncate">{r}</span>
-                    <button
-                      type="button"
-                      onClick={() => void removeRoot(r)}
-                      disabled={phase === "scanning" || phase === "cleaning"}
-                      className="btn-press shrink-0 rounded-md p-0.5 text-[var(--color-ink)]/40 hover:text-[var(--color-danger)] disabled:opacity-40"
-                      aria-label={`移除 ${r}`}
-                    >
-                      <X size={12} weight="bold" />
-                    </button>
-                  </span>
-                ))}
-                {meta.rootsHint && (
-                  <span className="text-xs text-[var(--color-ink)]/45 self-center">
-                    {meta.rootsHint}
-                  </span>
-                )}
-              </div>
-            </>
-          )}
-
-          {!meta.needsRoots && (
-            <div className="flex flex-wrap gap-3 items-center justify-between">
-              <p className="text-[13px] text-[var(--color-ink)]/60 max-w-[52ch] leading-relaxed">
-                {mode === "docker"
-                  ? "将扫描 Docker / WSL 虚拟磁盘，并可执行 docker system prune"
-                  : "将扫描 Temp、回收站、浏览器全配置、应用缓存、升级残留与崩溃转储"}
-              </p>
-              <button
-                type="button"
-                onClick={() => void startScan()}
-                disabled={!canScan}
-                className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] text-white px-4 py-2 text-sm font-semibold hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
-              >
-                <MagnifyingGlass size={15} weight="bold" />
-                {phase === "scanning" ? "扫描中…" : "开始扫描"}
-              </button>
-            </div>
-          )}
-
-          {meta.needsThreshold && (
-            <div
-              className={[
-                "flex flex-wrap items-center gap-2",
-                meta.needsRoots ? "mt-3 pt-3 border-t border-[var(--color-sand)]/50" : "mt-1",
-              ].join(" ")}
-            >
-              <span className="text-xs text-[var(--color-ink)]/55">
-                {thresholdLabel(mode)}
-              </span>
-              {presets.map((preset) => (
-                <button
-                  key={preset.bytes}
-                  type="button"
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  onClick={() => void updateMinFileBytes(preset.bytes)}
-                  className={chipClass(minFileBytes === preset.bytes)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
-                自定义
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  value={Math.max(1, Math.round(minFileBytes / (1024 * 1024)))}
-                  onChange={(e) => {
-                    const mb = Number(e.target.value);
-                    if (!Number.isFinite(mb) || mb < 1) return;
-                    void updateMinFileBytes(Math.round(mb) * 1024 * 1024);
-                  }}
-                  className="w-16 rounded-lg border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
-                />
-                MB
-              </label>
-            </div>
-          )}
-
-          {meta.needsStaleDays && (
-            <div
-              className={[
-                "flex flex-wrap items-center gap-2",
-                meta.needsRoots || meta.needsThreshold
-                  ? "mt-3 pt-3 border-t border-[var(--color-sand)]/50"
-                  : "mt-1",
-              ].join(" ")}
-            >
-              <span className="text-xs text-[var(--color-ink)]/55">
-                {mode === "stale" ? "闲置天数" : "闲置 node_modules"}
-              </span>
-              {STALE_DAY_PRESETS.map((preset) => (
-                <button
-                  key={preset.days}
-                  type="button"
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  onClick={() => void updateStaleDays(preset.days)}
-                  className={chipClass(staleDays === preset.days)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink)]/55">
-                自定义
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  disabled={phase === "scanning" || phase === "cleaning"}
-                  value={Math.max(1, staleDays)}
-                  onChange={(e) => {
-                    const days = Number(e.target.value);
-                    if (!Number.isFinite(days) || days < 1) return;
-                    void updateStaleDays(Math.round(days));
-                  }}
-                  className="w-16 rounded-lg border border-[var(--color-sand)] bg-white/80 px-2 py-1 text-xs font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
-                />
-                天未修改
-              </label>
-            </div>
-          )}
-
-          {phase === "scanning" && scanProgress && (
-            <div className="mt-3 pt-3 border-t border-[var(--color-sand)]/50">
-              <div className="scan-rail" aria-hidden />
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <p className="min-w-0 flex-1 text-xs font-mono text-[var(--color-ink)]/55 truncate animate-pulse-soft">
-                  {scanProgress.currentPath}
-                  <span className="ml-2">
-                    已发现 {scanProgress.itemsFound} 项 /{" "}
-                    {formatBytes(scanProgress.bytesFound)}
-                  </span>
-                </p>
-                <button
-                  type="button"
-                  onClick={cancelScan}
-                  className="btn-press shrink-0 rounded-lg border border-[var(--color-sand)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]"
-                >
-                  取消扫描
-                </button>
-              </div>
-            </div>
-          )}
-          {error && (
-            <p className="mt-3 text-sm text-[var(--color-danger)]">{error}</p>
-          )}
-        </div>
-      </section>
+      <CleanScanPanel
+        mode={mode}
+        phase={phase}
+        roots={roots}
+        rootInput={rootInput}
+        canScan={canScan}
+        minFileBytes={minFileBytes}
+        staleDays={staleDays}
+        scanProgress={scanProgress}
+        error={error}
+        presets={presets}
+        onRootInputChange={setRootInput}
+        onAddRoot={() => void addRoot()}
+        onRemoveRoot={(r) => void removeRoot(r)}
+        onStartScan={() => void startScan()}
+        onCancelScan={cancelScan}
+        onMinFileBytesChange={(b) => void updateMinFileBytes(b)}
+        onStaleDaysChange={(d) => void updateStaleDays(d)}
+      />
 
       <main
         ref={scrollRef}

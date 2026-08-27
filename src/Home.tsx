@@ -15,6 +15,7 @@ import {
   Memory,
   MouseRightClick,
   RocketLaunch,
+  ShieldCheck,
   ShieldWarning,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -109,6 +110,7 @@ export default function Home({ onOpenTool }: HomeProps) {
   );
   const [historyDetailOpen, setHistoryDetailOpen] = useState(false);
   const [historyDetailLeaving, setHistoryDetailLeaving] = useState(false);
+  const [elevated, setElevated] = useState<boolean | null>(null);
 
   const refreshHomeStats = useCallback(async () => {
     setRefreshing(true);
@@ -151,10 +153,11 @@ export default function Home({ onOpenTool }: HomeProps) {
   useEffect(() => {
     (async () => {
       try {
-        const [d, h, cfg] = await Promise.all([
+        const [d, h, cfg, isAdmin] = await Promise.all([
           invoke<DriveInfo[]>("list_drives"),
           invoke<HistoryEntry[]>("load_history"),
           invoke<AppConfig>("load_config"),
+          invoke<boolean>("is_elevated"),
         ]);
         setDrives(d);
         setHistory(h.slice(0, 3));
@@ -163,6 +166,7 @@ export default function Home({ onOpenTool }: HomeProps) {
           h.reduce((sum, entry) => sum + (entry.dryRun ? 0 : entry.freedBytes), 0),
         );
         setProtectedPaths(cfg.protectedPaths ?? []);
+        setElevated(isAdmin);
       } catch (e) {
         showToast(`加载首页数据失败：${String(e)}`);
       }
@@ -315,6 +319,37 @@ export default function Home({ onOpenTool }: HomeProps) {
       </header>
 
       <div className="home-grid flex-1 px-6 min-h-0">
+        {elevated === false && (
+          <section
+            className="home-grid__alert animate-fade-up rounded-2xl border border-amber-200/80 bg-amber-50/90 px-4 py-3"
+            style={{ animationDelay: "10ms" }}
+            aria-label="权限提示"
+          >
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <ShieldCheck
+                  size={18}
+                  weight="duotone"
+                  className="shrink-0 text-[var(--color-warn)]"
+                />
+                <p className="text-[12.5px] text-[var(--color-ink)]/75">
+                  当前为普通用户权限，部分系统清理与内存深度优化可能失败
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void invoke("restart_as_admin").catch((e) => showToast(String(e)));
+                }}
+                className="btn-press inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11.5px] font-semibold text-[var(--color-warn)] hover:bg-white/60"
+              >
+                以管理员重启
+                <ArrowRight size={11} weight="bold" />
+              </button>
+            </div>
+          </section>
+        )}
+
         {tightDrives.length > 0 && (
           <section
             className="home-warning home-grid__alert animate-fade-up rounded-2xl px-4 py-3"
