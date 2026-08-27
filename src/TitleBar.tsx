@@ -1,35 +1,8 @@
-import { useEffect, useState } from "react";
+import { Minus, X } from "@phosphor-icons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CopySimple, Minus, Square, X } from "@phosphor-icons/react";
 import AppIcon from "./AppIcon";
 
 export default function TitleBar() {
-  const [maximized, setMaximized] = useState(false);
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const next = await appWindow.isMaximized();
-        if (!cancelled) setMaximized(next);
-        unlisten = await appWindow.onResized(async () => {
-          const m = await appWindow.isMaximized();
-          if (!cancelled) setMaximized(m);
-        });
-      } catch {
-        /* browser preview */
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
   const win = () => getCurrentWindow();
 
   return (
@@ -37,7 +10,6 @@ export default function TitleBar() {
       <div
         data-tauri-drag-region
         className="flex-1 min-w-0 flex items-center gap-2 pl-3.5"
-        onDoubleClick={() => void win().toggleMaximize()}
       >
         <AppIcon size={15} className="rounded-[4px] shadow-sm" />
         <span
@@ -55,18 +27,6 @@ export default function TitleBar() {
           onClick={() => void win().minimize()}
         >
           <Minus size={14} weight="bold" />
-        </button>
-        <button
-          type="button"
-          className="app-titlebar__btn"
-          aria-label={maximized ? "还原" : "最大化"}
-          onClick={() => void win().toggleMaximize()}
-        >
-          {maximized ? (
-            <CopySimple size={13} weight="bold" />
-          ) : (
-            <Square size={12} weight="bold" />
-          )}
         </button>
         <button
           type="button"

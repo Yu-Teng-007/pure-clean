@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -10,7 +10,6 @@ import {
   ClockCountdown,
   Cpu,
   GearSix,
-  HardDrive,
   HardDrives,
   Lightning,
   Memory,
@@ -239,30 +238,51 @@ export default function Home({ onOpenTool }: HomeProps) {
 
   return (
     <div className="home-shell h-full flex flex-col overflow-y-auto">
-      <header className="home-header px-7 pt-6 pb-4 animate-fade-up">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <AppIcon size={36} className="rounded-[10px] shadow-md ring-1 ring-black/5" />
-              <h1 className="text-[1.75rem] font-semibold tracking-[-0.03em] text-[var(--color-ink)] text-balance leading-[1.15]">
+      <header className="home-topbar animate-fade-up mx-6 mt-5 mb-1">
+        <div className="home-topbar__inner flex items-center gap-4 px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-3">
+            <AppIcon size={32} className="rounded-[9px] shadow-sm ring-1 ring-black/[0.04]" />
+            <div className="min-w-0">
+              <h1 className="text-[15px] font-semibold tracking-[-0.02em] text-[var(--color-ink)] leading-none">
                 净界
               </h1>
+              <p className="mt-0.5 truncate text-[11.5px] text-[var(--color-ink)]/50">
+                {timeGreeting()}
+              </p>
             </div>
-            <p className="mt-1.5 text-[13.5px] leading-relaxed text-[var(--color-ink)]/60 whitespace-nowrap">
-              {timeGreeting()}，智能优化与按场景清理，安全释放磁盘空间。
-            </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+
+          {historyCount > 0 && (
+            <>
+              <span className="home-topbar__divider hidden sm:block" aria-hidden />
+              <div className="hidden sm:flex items-center gap-5">
+                <div className="home-metric">
+                  <span className="home-metric__label">累计释放</span>
+                  <span className="home-metric__value font-mono text-[var(--color-sea)]">
+                    {formatBytes(totalFreedBytes)}
+                  </span>
+                </div>
+                <div className="home-metric">
+                  <span className="home-metric__label">清理次数</span>
+                  <span className="home-metric__value font-mono">
+                    {historyCount}
+                  </span>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               onClick={() => void refreshWithToast()}
               disabled={refreshing}
-              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)] disabled:opacity-50"
+              className="home-topbar__btn btn-press"
               aria-label="刷新数据"
               title="刷新磁盘与历史"
             >
               <ArrowsClockwise
-                size={15}
+                size={16}
                 weight="bold"
                 className={refreshing ? "animate-spin-orbit" : ""}
               />
@@ -270,21 +290,22 @@ export default function Home({ onOpenTool }: HomeProps) {
             <button
               type="button"
               onClick={() => onOpenTool("settings")}
-              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
+              className="home-topbar__btn btn-press"
+              aria-label="设置"
+              title="设置"
             >
-              <GearSix size={15} weight="duotone" />
-              设置
+              <GearSix size={16} weight="duotone" />
             </button>
             <button
               type="button"
               onClick={() => setProtectOpen(true)}
-              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
+              className="home-topbar__btn btn-press relative"
               aria-haspopup="dialog"
+              aria-label="保护路径"
             >
-              <ShieldWarning size={15} weight="duotone" className="text-[var(--color-warn)]" />
-              保护路径
+              <ShieldWarning size={16} weight="duotone" className="text-[var(--color-warn)]" />
               {protectedPaths.length > 0 && (
-                <span className="rounded-md bg-[var(--color-warn)]/12 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warn)]">
+                <span className="home-topbar__badge font-mono">
                   {protectedPaths.length}
                 </span>
               )}
@@ -293,151 +314,121 @@ export default function Home({ onOpenTool }: HomeProps) {
         </div>
       </header>
 
-      <div className="home-grid flex-1 px-7 pb-7 min-h-0">
-        <main className="home-main min-w-0 flex flex-col gap-5">
-          {(historyCount > 0 || tightDrives.length > 0) && (
-            <section
-              className="animate-fade-up flex flex-wrap gap-2.5"
-              style={{ animationDelay: "30ms" }}
-              aria-label="概览"
-            >
-              {historyCount > 0 && (
-                <div className="home-stat flex min-w-[9rem] flex-1 items-center gap-3 rounded-2xl px-4 py-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
-                    <Broom size={18} weight="duotone" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[11px] text-[var(--color-ink)]/45">
-                      累计释放
-                    </span>
-                    <span className="home-stat__value block font-mono text-[15px] font-semibold text-[var(--color-sea)]">
-                      {formatBytes(totalFreedBytes)}
-                    </span>
-                  </span>
-                </div>
-              )}
-              {historyCount > 0 && (
-                <div className="home-stat flex min-w-[9rem] flex-1 items-center gap-3 rounded-2xl px-4 py-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
-                    <ClockCountdown size={18} weight="duotone" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-[11px] text-[var(--color-ink)]/45">
-                      清理次数
-                    </span>
-                    <span className="home-stat__value block font-mono text-[15px] font-semibold text-[var(--color-ink)]">
-                      {historyCount} 次
-                    </span>
-                  </span>
-                </div>
-              )}
-            </section>
-          )}
-
-          {tightDrives.length > 0 && (
-            <section
-              className="home-warning animate-fade-up rounded-2xl px-4 py-3.5"
-              style={{ animationDelay: "40ms" }}
-              aria-label="磁盘空间预警"
-            >
-              <div className="flex flex-wrap items-start gap-3 justify-between">
-                <div className="flex min-w-0 items-start gap-2.5">
-                  <WarningCircle
-                    size={20}
-                    weight="duotone"
-                    className="mt-0.5 shrink-0 text-[var(--color-warn)]"
-                  />
-                  <div className="min-w-0">
-                    <p className="text-[13px] font-semibold text-[var(--color-ink)]">
-                      {tightDrives.length === 1
-                        ? `${tightDrives[0].name} 空间不足`
-                        : `${tightDrives.length} 个磁盘空间不足`}
-                    </p>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-ink)]/55">
-                      可用空间低于 10%，建议分析占用或执行清理。
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onOpenTool("diskAnalyzer")}
-                  className="btn-press inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-[12px] font-semibold text-[var(--color-warn)] hover:bg-[var(--color-foam)]"
-                >
-                  分析磁盘
-                  <ArrowRight size={12} weight="bold" />
-                </button>
+      <div className="home-grid flex-1 px-6 min-h-0">
+        {tightDrives.length > 0 && (
+          <section
+            className="home-warning home-grid__alert animate-fade-up rounded-2xl px-4 py-3"
+            style={{ animationDelay: "20ms" }}
+            aria-label="磁盘空间预警"
+          >
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <WarningCircle
+                  size={18}
+                  weight="duotone"
+                  className="shrink-0 text-[var(--color-warn)]"
+                />
+                <p className="text-[12.5px] font-medium text-[var(--color-ink)]">
+                  {tightDrives.length === 1
+                    ? `${tightDrives[0].name} 可用空间低于 10%`
+                    : `${tightDrives.length} 个磁盘可用空间低于 10%`}
+                </p>
               </div>
-            </section>
-          )}
+              <button
+                type="button"
+                onClick={() => onOpenTool("diskAnalyzer")}
+                className="btn-press inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11.5px] font-semibold text-[var(--color-warn)] hover:bg-white/60"
+              >
+                分析磁盘
+                <ArrowRight size={11} weight="bold" />
+              </button>
+            </div>
+          </section>
+        )}
 
+        <div className="home-main flex min-w-0 flex-col gap-3">
           <section
             className="animate-fade-up"
-            style={{ animationDelay: "50ms" }}
+            style={{ animationDelay: "40ms" }}
             aria-label="智能优化"
           >
             <button
               type="button"
               onClick={() => setOptimizeOpen(true)}
-              className="btn-press home-featured group w-full text-left rounded-2xl p-5 md:p-6"
+              className="btn-press home-featured group w-full text-left rounded-[1.25rem] p-5 md:p-6"
               aria-haspopup="dialog"
             >
-              <div className="flex items-start gap-4">
-                <span className="home-featured__icon flex size-11 shrink-0 items-center justify-center rounded-2xl">
-                  <Lightning size={24} weight="duotone" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xl font-semibold tracking-[-0.02em] text-white leading-tight">
-                    智能优化
+              <div className="home-featured__glow" aria-hidden />
+              <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3.5">
+                  <span className="home-featured__icon flex size-11 shrink-0 items-center justify-center rounded-2xl">
+                    <Lightning size={24} weight="duotone" />
                   </span>
-                  <span className="mt-1.5 block max-w-[42ch] text-[13px] leading-relaxed text-white/72">
-                    一键安全清理，并建议禁用非必要开机项
+                  <span className="min-w-0">
+                    <span className="block text-xl font-semibold tracking-[-0.03em] text-white leading-tight">
+                      智能优化
+                    </span>
+                    <span className="mt-1.5 block max-w-[36ch] text-[13px] leading-relaxed text-white/70">
+                      一键安全清理，并建议禁用非必要开机项
+                    </span>
                   </span>
-                  <span className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-[13px] font-semibold text-[var(--color-sea)] group-hover:bg-[var(--color-foam)] group-active:scale-[0.98] transition-[background-color,transform] duration-150">
-                    开始体检优化
-                    <ArrowRight
-                      size={15}
-                      weight="bold"
-                      className="transition-transform duration-150 group-hover:translate-x-0.5"
-                    />
-                  </span>
+                </div>
+                <span className="home-featured__cta inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold">
+                  开始体检优化
+                  <ArrowRight
+                    size={15}
+                    weight="bold"
+                    className="transition-transform duration-150 group-hover:translate-x-0.5"
+                  />
                 </span>
               </div>
+
+              {historyCount > 0 && (
+                <div className="home-featured__stats relative mt-4 flex gap-6 border-t border-white/10 pt-3.5 sm:hidden">
+                  <div className="home-metric home-metric--on-dark">
+                    <span className="home-metric__label">累计释放</span>
+                    <span className="home-metric__value font-mono">
+                      {formatBytes(totalFreedBytes)}
+                    </span>
+                  </div>
+                  <div className="home-metric home-metric--on-dark">
+                    <span className="home-metric__label">清理次数</span>
+                    <span className="home-metric__value font-mono">{historyCount}</span>
+                  </div>
+                </div>
+              )}
             </button>
           </section>
 
           <nav
             className="animate-fade-up min-h-0"
-            style={{ animationDelay: "90ms" }}
+            style={{ animationDelay: "60ms" }}
             aria-label="工具"
           >
-            <ul className="home-modes grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {HOME_TOOLS.map(({ id, title, desc, Icon }, index) => (
-                <li
-                  key={id}
-                  className="min-h-0"
-                  style={{ animationDelay: `${110 + index * 14}ms` }}
-                >
+            <ul className="home-tools">
+              {HOME_TOOLS.map(({ id, title, desc, Icon }) => (
+                <li key={id} className="home-tools__cell">
                   <button
                     type="button"
                     onClick={() => onOpenTool(id)}
-                    className="btn-press home-mode group flex h-full w-full items-center gap-3.5 rounded-2xl px-4 py-3.5 text-left"
+                    className="btn-press home-mode group flex h-full w-full items-center gap-3.5 rounded-[1rem] px-4 py-3.5 text-left"
                   >
                     <span className="home-mode__icon flex size-9 shrink-0 items-center justify-center rounded-xl">
                       <Icon size={18} weight="duotone" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span className="text-[14px] font-semibold tracking-tight text-[var(--color-ink)] transition-colors duration-150 group-hover:text-[var(--color-sea)]">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-[13.5px] font-semibold tracking-[-0.01em] text-[var(--color-ink)] transition-colors duration-150 group-hover:text-[var(--color-sea)]">
                           {title}
                         </span>
                         <ArrowRight
-                          size={13}
+                          size={12}
                           weight="bold"
-                          className="-translate-x-1 text-[var(--color-ink)]/25 opacity-0 transition-[opacity,transform,color] duration-150 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] group-hover:opacity-100"
+                          className="-translate-x-1 text-[var(--color-ink)]/20 opacity-0 transition-[opacity,transform,color] duration-150 group-hover:translate-x-0 group-hover:text-[var(--color-sea)] group-hover:opacity-100"
                           aria-hidden
                         />
                       </span>
-                      <span className="home-mode__desc mt-1 text-[12px] leading-snug text-[var(--color-ink)]/48">
+                      <span className="home-mode__desc mt-0.5 block text-[11.5px] leading-snug text-[var(--color-ink)]/44">
                         {desc}
                       </span>
                     </span>
@@ -446,21 +437,25 @@ export default function Home({ onOpenTool }: HomeProps) {
               ))}
             </ul>
           </nav>
-        </main>
+        </div>
 
-        <aside
-          className="home-aside flex flex-col gap-4 animate-fade-up"
-          style={{ animationDelay: "70ms" }}
-        >
-          <section aria-label="磁盘空间" className="home-panel rounded-2xl p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <HardDrives size={15} weight="duotone" className="text-[var(--color-sea)]" />
-              <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
-                磁盘空间
-              </h2>
+        <aside className="home-aside flex flex-col gap-3 animate-fade-up" style={{ animationDelay: "50ms" }}>
+          <section aria-label="磁盘空间" className="home-panel home-panel--glass rounded-[1.25rem] p-4">
+            <div className="mb-3.5 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <HardDrives size={15} weight="duotone" className="text-[var(--color-sea)]" />
+                <h2 className="text-[12.5px] font-semibold tracking-tight text-[var(--color-ink)]">
+                  磁盘空间
+                </h2>
+              </div>
+              {drives.length > 0 && (
+                <span className="text-[10px] font-mono text-[var(--color-ink)]/35">
+                  {drives.length} 个分区
+                </span>
+              )}
             </div>
             {drives.length > 0 ? (
-              <ul className="space-y-3.5">
+              <ul className="space-y-2">
                 {drives.map((drive) => {
                   const used = Math.max(0, drive.totalBytes - drive.freeBytes);
                   const pct =
@@ -473,52 +468,44 @@ export default function Home({ onOpenTool }: HomeProps) {
                       <button
                         type="button"
                         onClick={() => onOpenTool("diskAnalyzer")}
-                        className="home-drive-row btn-press w-full rounded-xl px-2 py-2 text-left"
+                        className="home-drive-row btn-press w-full rounded-xl px-2.5 py-2.5 text-left"
                         title="点击查看磁盘空间分析"
                       >
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <span className="inline-flex min-w-0 items-center gap-2">
-                          <span
-                            className="home-drive-icon relative flex size-7 shrink-0 items-center justify-center rounded-lg"
-                            aria-hidden
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="home-drive-ring shrink-0"
+                            role="meter"
+                            aria-valuenow={Math.round(pct)}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-label={`${drive.name} 已用 ${Math.round(pct)}%`}
+                            style={{ "--drive-pct": `${pct}%` } as CSSProperties}
                           >
-                            <HardDrive size={16} weight="duotone" />
-                            <span className="home-drive-letter absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-[4px] font-mono text-[8px] font-bold leading-none">
+                            <span className="home-drive-ring__label font-mono">
                               {driveLetter(drive.name)}
                             </span>
-                          </span>
-                          <span className="truncate text-[13px] font-semibold font-mono tracking-tight">
-                            {drive.name}
-                          </span>
-                        </span>
-                        <span
-                          className={[
-                            "shrink-0 text-[11px] font-mono tabular-nums",
-                            tight
-                              ? "font-semibold text-[var(--color-warn)]"
-                              : "text-[var(--color-ink)]/50",
-                          ].join(" ")}
-                        >
-                          {Math.round(pct)}% 已用
-                        </span>
-                      </div>
-                      <div
-                        className="home-disk-track"
-                        role="meter"
-                        aria-valuenow={Math.round(pct)}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label={`${drive.name} 已用 ${Math.round(pct)}%`}
-                      >
-                        <div
-                          className={`home-disk-fill ${tight ? "home-disk-fill--tight" : ""}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <p className="mt-1 text-[10.5px] font-mono text-[var(--color-ink)]/40">
-                        可用 {formatBytes(drive.freeBytes)} · {formatBytes(used)} /{" "}
-                        {formatBytes(drive.totalBytes)}
-                      </p>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="truncate text-[12.5px] font-semibold font-mono tracking-tight">
+                                {drive.name}
+                              </span>
+                              <span
+                                className={[
+                                  "shrink-0 text-[10.5px] font-mono tabular-nums",
+                                  tight
+                                    ? "font-semibold text-[var(--color-warn)]"
+                                    : "text-[var(--color-ink)]/45",
+                                ].join(" ")}
+                              >
+                                {Math.round(pct)}%
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-[10px] font-mono text-[var(--color-ink)]/38">
+                              可用 {formatBytes(drive.freeBytes)}
+                            </p>
+                          </div>
+                        </div>
                       </button>
                     </li>
                   );
@@ -533,7 +520,7 @@ export default function Home({ onOpenTool }: HomeProps) {
 
           <section
             aria-label="最近清理"
-            className="home-panel rounded-2xl p-4 flex-1 min-h-0"
+            className="home-panel home-panel--glass rounded-[1.25rem] p-4 flex-1 min-h-0"
           >
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -542,38 +529,39 @@ export default function Home({ onOpenTool }: HomeProps) {
                   weight="duotone"
                   className="text-[var(--color-sea)]"
                 />
-                <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+                <h2 className="text-[12.5px] font-semibold tracking-tight text-[var(--color-ink)]">
                   最近清理
                 </h2>
               </div>
               <button
                 type="button"
                 onClick={() => onOpenTool("history")}
-                className="btn-press text-[11px] font-medium text-[var(--color-sea)] hover:underline"
+                className="btn-press text-[10.5px] font-medium text-[var(--color-sea)] hover:underline"
               >
                 全部
               </button>
             </div>
             {history.length > 0 ? (
-              <ul className="divide-y divide-[var(--color-sand)]/50">
+              <ul className="space-y-1.5">
                 {history.map((h) => (
-                  <li key={h.id} className="first:pt-0 last:pb-0">
+                  <li key={h.id}>
                     <button
                       type="button"
                       onClick={() => openHistoryDetail(h)}
-                      className="btn-press w-full rounded-lg py-2.5 text-left outline-none hover:bg-[var(--color-mist)]/60 focus-visible:ring-2 focus-visible:ring-[var(--color-sea)]/35"
+                      className="home-history-item btn-press w-full rounded-xl px-3 py-2.5 text-left"
                     >
-                      <p className="text-[12.5px] font-medium text-[var(--color-ink)]/80">
-                        释放{" "}
-                        <span className="font-mono text-[var(--color-sea)]">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-[13px] font-semibold text-[var(--color-sea)]">
                           {formatBytes(h.freedBytes)}
                         </span>
-                      </p>
-                      <p className="mt-0.5 text-[11px] font-mono text-[var(--color-ink)]/42">
-                        {formatRelativeTime(h.timestamp)}
+                        <span className="text-[10px] font-mono text-[var(--color-ink)]/38">
+                          {formatRelativeTime(h.timestamp)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10.5px] text-[var(--color-ink)]/42">
                         {h.failureCount > 0
-                          ? ` · 失败 ${h.failureCount}`
-                          : ` · 成功 ${h.successCount}`}
+                          ? `失败 ${h.failureCount} 项`
+                          : `成功 ${h.successCount} 项`}
                       </p>
                     </button>
                   </li>
