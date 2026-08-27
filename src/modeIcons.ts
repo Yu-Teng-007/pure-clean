@@ -3,6 +3,7 @@ import {
   Code,
   CopySimple,
   Cube,
+  Detective,
   Desktop,
   Files,
   Package,
@@ -20,4 +21,5 @@ export const MODE_ICONS: Record<CleanMode, Icon> = {
   stale: ClockCountdown,
   installers: Package,
   docker: Cube,
+  advanced: Detective,
 };

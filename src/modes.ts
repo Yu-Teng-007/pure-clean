@@ -8,7 +8,8 @@ export type CleanMode =
   | "docker"
   | "dupes"
   | "stale"
-  | "installers";
+  | "installers"
+  | "advanced";
 
 export interface ModeMeta {
   id: CleanMode;
@@ -33,6 +34,7 @@ export const MODE_ORDER: CleanMode[] = [
   "dupes",
   "stale",
   "installers",
+  "advanced",
   "docker",
 ];
 
@@ -150,6 +152,23 @@ export const MODES: Record<CleanMode, ModeMeta> = {
     needsStaleDays: false,
     safeOnly: false,
     emptyHint: "点击「开始扫描」查找 Docker / WSL 占用",
+  },
+  advanced: {
+    id: "advanced",
+    title: "系统进阶",
+    subtitle:
+      "浏览器隐私、下载器缓存、卸载残留；WinSxS / 休眠 / 页文件仅检测或引导系统工具",
+    categories: [
+      "browser_privacy",
+      "download_tools",
+      "uninstall_leftovers",
+      "system_advisory",
+    ],
+    needsRoots: false,
+    needsThreshold: false,
+    needsStaleDays: false,
+    safeOnly: false,
+    emptyHint: "点击「开始扫描」查找进阶清理项",
   },
 };
 

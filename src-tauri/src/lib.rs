@@ -11,6 +11,7 @@ mod process_lock;
 mod recycle_restore;
 mod scan;
 mod startup;
+mod system_tools;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -32,6 +33,7 @@ pub fn run() {
             commands::find_locking_processes,
             commands::restore_history,
             commands::open_recycle_bin,
+            commands::open_disk_cleanup,
             commands::format_bytes,
             commands::list_drives,
             commands::analyze_disk_usage,

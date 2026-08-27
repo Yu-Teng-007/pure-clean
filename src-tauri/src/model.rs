@@ -20,6 +20,10 @@ pub enum Category {
     DuplicateFiles,
     StaleFiles,
     Installers,
+    BrowserPrivacy,
+    DownloadTools,
+    UninstallLeftovers,
+    SystemAdvisory,
 }
 
 impl Category {
@@ -42,6 +46,10 @@ impl Category {
             Category::DuplicateFiles => "重复文件",
             Category::StaleFiles => "闲置文件",
             Category::Installers => "安装包 / 镜像",
+            Category::BrowserPrivacy => "浏览器隐私数据",
+            Category::DownloadTools => "下载器 / 启动器缓存",
+            Category::UninstallLeftovers => "卸载残留",
+            Category::SystemAdvisory => "系统建议（仅检测）",
         }
     }
 
@@ -64,6 +72,10 @@ impl Category {
             Category::DuplicateFiles,
             Category::StaleFiles,
             Category::Installers,
+            Category::BrowserPrivacy,
+            Category::DownloadTools,
+            Category::UninstallLeftovers,
+            Category::SystemAdvisory,
         ]
     }
 }

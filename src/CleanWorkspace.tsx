@@ -138,8 +138,18 @@ function matchItemByPath(items: ScanItem[], path: string): ScanItem | undefined 
       (i.special === "docker_prune" &&
         (path === "docker_prune" ||
           path.includes("Docker") ||
-          path.toLowerCase().includes("docker"))),
+          path.toLowerCase().includes("docker"))) ||
+      (i.special === "open_disk_cleanup" &&
+        (path.includes("WinSxS") || path.includes("磁盘清理"))),
   );
+}
+
+function isAdvisoryOnly(item: ScanItem): boolean {
+  return item.special === "advisory_only";
+}
+
+function isSelectable(item: ScanItem): boolean {
+  return !isAdvisoryOnly(item);
 }
 
 interface CleanWorkspaceProps {
@@ -526,7 +536,10 @@ export default function CleanWorkspace({
     () =>
       items.filter(
         (i) =>
-          selected.has(i.id) && !exitingIds.has(i.id) && !goneIds.has(i.id),
+          selected.has(i.id) &&
+          isSelectable(i) &&
+          !exitingIds.has(i.id) &&
+          !goneIds.has(i.id),
       ),
     [items, selected, exitingIds, goneIds],
   );
@@ -543,6 +556,8 @@ export default function CleanWorkspace({
 
   const toggleItem = (id: string) => {
     if (phase === "cleaning") return;
+    const item = items.find((i) => i.id === id);
+    if (item && !isSelectable(item)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -556,6 +571,7 @@ export default function CleanWorkspace({
     setSelected((prev) => {
       const next = new Set(prev);
       for (const item of catItems) {
+        if (!isSelectable(item)) continue;
         if (on) next.add(item.id);
         else next.delete(item.id);
       }
@@ -566,7 +582,19 @@ export default function CleanWorkspace({
   const clearSelection = () => setSelected(new Set());
 
   const selectAllSafe = () => {
-    setSelected(new Set(items.filter((i) => i.risk === "safe").map((i) => i.id)));
+    setSelected(
+      new Set(
+        items.filter((i) => i.risk === "safe" && isSelectable(i)).map((i) => i.id),
+      ),
+    );
+  };
+
+  const openDiskCleanup = async () => {
+    try {
+      await invoke("open_disk_cleanup", { drive: null });
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const closeConfirm = (after?: () => void) => {
@@ -669,6 +697,9 @@ export default function CleanWorkspace({
                 f.path.toLowerCase().includes("docker"),
             );
           }
+          if (i.special === "open_disk_cleanup") {
+            return false;
+          }
           return !failedPaths.has(i.path);
         })
         .map((i) => i.id);
@@ -695,6 +726,9 @@ export default function CleanWorkspace({
                 f.path === "Docker system prune" ||
                 f.path.toLowerCase().includes("docker"),
             );
+          }
+          if (i.special === "open_disk_cleanup") {
+            return true;
           }
           return failedPaths.has(i.path);
         }),
@@ -765,6 +799,8 @@ export default function CleanWorkspace({
     const isExiting = exitingIds.has(item.id);
     const isCleaning = phase === "cleaning" && activeCleanId === item.id;
     const isSelected = selected.has(item.id);
+    const advisory = isAdvisoryOnly(item);
+    const opensTool = item.special === "open_disk_cleanup";
     return (
       <li
         key={`${listEpoch}-${item.id}`}
@@ -786,8 +822,8 @@ export default function CleanWorkspace({
           type="checkbox"
           checked={isSelected}
           onChange={() => toggleItem(item.id)}
-          disabled={phase === "cleaning" || isExiting}
-          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90"
+          disabled={phase === "cleaning" || isExiting || advisory}
+          className="mt-1 accent-[var(--color-sea)] transition-transform duration-100 active:scale-90 disabled:opacity-40"
         />
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -820,6 +856,21 @@ export default function CleanWorkspace({
               <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/10 text-[var(--color-warn)]">
                 副本
               </span>
+            )}
+            {advisory && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-ink)]/8 text-[var(--color-ink)]/55">
+                仅检测
+              </span>
+            )}
+            {opensTool && (
+              <button
+                type="button"
+                onClick={() => void openDiskCleanup()}
+                disabled={phase === "cleaning"}
+                className="btn-press text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-[var(--color-sea)]/10 text-[var(--color-sea)] hover:underline disabled:opacity-40"
+              >
+                打开磁盘清理
+              </button>
             )}
             {isCleaning && (
               <span className="text-[10px] font-medium text-[var(--color-sea-bright)] animate-pulse-soft">
@@ -1088,7 +1139,9 @@ export default function CleanWorkspace({
             if (visibleItems.length === 0) return null;
             const label = visibleItems[0]?.categoryLabel ?? category;
             const catBytes = visibleItems.reduce((s, i) => s + i.bytes, 0);
-            const selectable = visibleItems.filter((i) => !exitingIds.has(i.id));
+            const selectable = visibleItems.filter(
+              (i) => !exitingIds.has(i.id) && isSelectable(i),
+            );
             const allOn =
               selectable.length > 0 &&
               selectable.every((i) => selected.has(i.id));

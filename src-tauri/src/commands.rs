@@ -228,6 +228,11 @@ pub fn open_recycle_bin() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_disk_cleanup(drive: Option<String>) -> Result<(), String> {
+    crate::system_tools::open_disk_cleanup(drive)
+}
+
+#[tauri::command]
 pub fn clear_history() -> Result<(), String> {
     history::clear_history()
 }

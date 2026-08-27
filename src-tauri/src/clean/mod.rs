@@ -416,6 +416,7 @@ pub fn run_clean_with_options(
             .map(|s| match s {
                 "recycle_bin" => "回收站",
                 "docker_prune" => "Docker system prune",
+                "open_disk_cleanup" => "WinSxS 组件清理",
                 other => other,
             })
             .unwrap_or(target.path.as_str());
@@ -467,6 +468,20 @@ pub fn run_clean_with_options(
                         record_category(&mut by_cat, target.category.as_ref(), 0);
                     }
                     Err(e) => push_failure(&mut failures, "Docker system prune".into(), e),
+                },
+                "advisory_only" => {
+                    // Detection-only; never delete.
+                }
+                "open_disk_cleanup" => match crate::system_tools::open_disk_cleanup(None) {
+                    Ok(()) => {
+                        success_count += 1;
+                        record_category(&mut by_cat, target.category.as_ref(), 0);
+                    }
+                    Err(e) => push_failure(
+                        &mut failures,
+                        target.path.clone(),
+                        e,
+                    ),
                 },
                 other => push_failure(
                     &mut failures,

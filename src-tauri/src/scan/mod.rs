@@ -1,3 +1,4 @@
+pub mod advanced;
 pub mod dev_cache;
 pub mod hints;
 pub mod rules;
@@ -11,6 +12,9 @@ use tauri::{AppHandle, Emitter};
 
 use crate::config::{self, DEFAULT_DUPE_MIN_BYTES, DEFAULT_MIN_FILE_BYTES, DEFAULT_STALE_DAYS};
 use crate::model::{Category, CleanTarget, Risk, ScanItem, ScanProgress, ScanResult};
+use crate::scan::advanced::{
+    scan_browser_privacy, scan_download_tools, scan_system_advisory, scan_uninstall_leftovers,
+};
 use crate::scan::hints::enrich_scan_item;
 use crate::scan::rules::{
     docker_prune_item, downloads_dir, fixed_app_cache_paths, fixed_dev_paths,
@@ -366,6 +370,54 @@ pub fn run_scan(
             protected_paths,
         );
         let _ = progress!()("Docker prune");
+    }
+
+    if !is_cancelled(cancel) && enabled.contains(&Category::BrowserPrivacy) {
+        for item in scan_browser_privacy(&enabled, progress!()) {
+            push_unique(
+                &mut items,
+                &mut items_found,
+                &mut bytes_found,
+                item,
+                protected_paths,
+            );
+        }
+    }
+
+    if !is_cancelled(cancel) && enabled.contains(&Category::DownloadTools) {
+        for item in scan_download_tools(&enabled, progress!()) {
+            push_unique(
+                &mut items,
+                &mut items_found,
+                &mut bytes_found,
+                item,
+                protected_paths,
+            );
+        }
+    }
+
+    if !is_cancelled(cancel) && enabled.contains(&Category::UninstallLeftovers) {
+        for item in scan_uninstall_leftovers(progress!()) {
+            push_unique(
+                &mut items,
+                &mut items_found,
+                &mut bytes_found,
+                item,
+                protected_paths,
+            );
+        }
+    }
+
+    if !is_cancelled(cancel) && enabled.contains(&Category::SystemAdvisory) {
+        for item in scan_system_advisory(progress!()) {
+            push_unique(
+                &mut items,
+                &mut items_found,
+                &mut bytes_found,
+                item,
+                protected_paths,
+            );
+        }
     }
 
     if !is_cancelled(cancel) && safe_only {

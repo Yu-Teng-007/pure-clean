@@ -15,7 +15,11 @@ export type Category =
   | "docker_wsl"
   | "duplicate_files"
   | "stale_files"
-  | "installers";
+  | "installers"
+  | "browser_privacy"
+  | "download_tools"
+  | "uninstall_leftovers"
+  | "system_advisory";
 
 export type Risk = "safe" | "caution" | "dangerous";
 
@@ -347,6 +351,10 @@ export const CATEGORY_ORDER: Category[] = [
   "duplicate_files",
   "stale_files",
   "installers",
+  "browser_privacy",
+  "download_tools",
+  "uninstall_leftovers",
+  "system_advisory",
 ];
 
 export const MIN_FILE_PRESETS: { label: string; bytes: number }[] = [
