@@ -1,9 +1,17 @@
-/** 解析后端返回的 `YYYY-MM-DD HH:MM:SS UTC` 时间戳 */
+/** 解析后端返回的本地时间 `YYYY-MM-DD HH:MM:SS`（兼容旧版 `… UTC`） */
 export function parseAppTimestamp(raw: string): Date | null {
-  const m = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/);
-  if (!m) return null;
-  const [, y, mo, d, h, mi, s] = m.map(Number);
-  return new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  const trimmed = raw.trim();
+  const legacyUtc = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) UTC$/,
+  );
+  if (legacyUtc) {
+    const [, y, mo, d, h, mi, s] = legacyUtc.map(Number);
+    return new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  }
+  const local = trimmed.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+  if (!local) return null;
+  const [, y, mo, d, h, mi, s] = local.map(Number);
+  return new Date(y, mo - 1, d, h, mi, s);
 }
 
 export function formatRelativeTime(raw: string): string {
@@ -24,11 +32,22 @@ export function formatRelativeTime(raw: string): string {
 }
 
 export function formatFriendlyTimestamp(raw: string): string {
+  const date = parseAppTimestamp(raw);
+  const localLabel = date
+    ? date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : raw.slice(0, 16);
   const rel = formatRelativeTime(raw);
   if (rel !== raw.slice(0, 10) && !rel.includes("-")) {
-    return `${rel} · ${raw.slice(0, 16)}`;
+    return `${rel} · ${localLabel}`;
   }
-  return raw.slice(0, 16);
+  return localLabel;
 }
 
 export function timeGreeting(): string {

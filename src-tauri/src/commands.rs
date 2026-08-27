@@ -103,26 +103,80 @@ pub fn save_config(config: AppConfig) -> Result<(), String> {
     config::save_config(&config)
 }
 
+fn filter_categories(request_categories: Vec<Category>, cfg: &AppConfig) -> Vec<Category> {
+    let enabled: HashSet<Category> = cfg.enabled_categories.iter().cloned().collect();
+    request_categories
+        .into_iter()
+        .filter(|c| enabled.contains(c))
+        .collect()
+}
+
+fn local_timestamp_now() -> String {
+    #[cfg(windows)]
+    {
+        use std::mem::MaybeUninit;
+        use windows_sys::Win32::Foundation::SYSTEMTIME;
+        use windows_sys::Win32::System::SystemInformation::GetLocalTime;
+        unsafe {
+            let mut st = MaybeUninit::<SYSTEMTIME>::zeroed();
+            GetLocalTime(st.as_mut_ptr());
+            let st = st.assume_init();
+            format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond
+            )
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let days = secs / 86400;
+        let tod = secs % 86400;
+        let hour = tod / 3600;
+        let min = (tod % 3600) / 60;
+        let sec = tod % 60;
+        let (y, m, d) = civil_from_days(days as i64);
+        format!("{y:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02}")
+    }
+}
+
 #[tauri::command]
-pub fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
+pub async fn scan(app: AppHandle, request: ScanRequest) -> ScanResult {
     SCAN_CANCEL.store(false, Ordering::SeqCst);
     let max_depth = request.max_depth.unwrap_or(6);
     let cfg = config::load_config();
     let protected = request
         .protected_paths
-        .unwrap_or(cfg.protected_paths);
-    scan::run_scan(
-        &app,
-        &request.roots,
-        request.categories,
-        max_depth,
-        request.min_file_bytes,
-        request.stale_days,
-        request.safe_only.unwrap_or(false),
-        &protected,
-        true,
-        Some(&SCAN_CANCEL),
-    )
+        .unwrap_or_else(|| cfg.protected_paths.clone());
+    let categories = filter_categories(
+        request.categories.unwrap_or_else(Category::all),
+        &cfg,
+    );
+    let roots = request.roots;
+    let min_file_bytes = request.min_file_bytes;
+    let stale_days = request.stale_days;
+    let safe_only = request.safe_only.unwrap_or(false);
+    let app = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        scan::run_scan(
+            &app,
+            &roots,
+            Some(categories),
+            max_depth,
+            min_file_bytes,
+            stale_days,
+            safe_only,
+            &protected,
+            true,
+            Some(&SCAN_CANCEL),
+        )
+    })
+    .await
+    .expect("scan task panicked")
 }
 
 #[tauri::command]
@@ -146,7 +200,7 @@ pub fn cancel_dev_cache_scan() {
 }
 
 #[tauri::command]
-pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
+pub async fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
     CLEAN_CANCEL.store(false, Ordering::SeqCst);
     let cfg = config::load_config();
     let protected = request
@@ -157,6 +211,7 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
     let to_recycle = request
         .to_recycle_bin
         .unwrap_or(cfg.to_recycle_bin_by_default);
+    let mode = request.mode.clone();
 
     let mut targets: Vec<CleanTarget> = request.targets.unwrap_or_default();
     if targets.is_empty() {
@@ -178,18 +233,25 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
         }
     }
 
-    let report = clean::run_clean_with_options(
-        &app,
-        &targets,
-        dry_run,
-        to_recycle,
-        &protected,
-        true,
-        Some(&CLEAN_CANCEL),
-        None,
-    );
+    let app = app.clone();
+    let targets_for_history = targets.clone();
 
-    let cleaned_items = history_cleaned_items(&targets, &report);
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        clean::run_clean_with_options(
+            &app,
+            &targets,
+            dry_run,
+            to_recycle,
+            &protected,
+            true,
+            Some(&CLEAN_CANCEL),
+            None,
+        )
+    })
+    .await
+    .expect("clean task panicked");
+
+    let cleaned_items = history_cleaned_items(&targets_for_history, &report);
 
     let _ = history::append_history(HistoryEntry {
         id: format!(
@@ -199,8 +261,8 @@ pub fn clean(app: AppHandle, request: CleanRequest) -> CleanReport {
                 .map(|d| d.as_millis())
                 .unwrap_or(0)
         ),
-        timestamp: chrono_like_now(),
-        mode: request.mode.clone(),
+        timestamp: local_timestamp_now(),
+        mode,
         freed_bytes: report.freed_bytes,
         success_count: report.success_count,
         failure_count: report.failures.len(),
@@ -245,46 +307,35 @@ pub fn clear_history() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn scan_dev_caches(app: AppHandle, roots: Option<Vec<String>>) -> DevCacheDashboard {
+pub async fn scan_dev_caches(app: AppHandle, roots: Option<Vec<String>>) -> DevCacheDashboard {
     DEV_CACHE_CANCEL.store(false, Ordering::SeqCst);
     let cfg = config::load_config();
     let scan_roots = roots.unwrap_or_else(|| cfg.scan_roots.clone());
     let protected = cfg.protected_paths.clone();
-    let mut last_emit = std::time::Instant::now();
-    scan::dev_cache::build_dashboard(
-        &scan_roots,
-        &protected,
-        Some(&DEV_CACHE_CANCEL),
-        |path| {
-            if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
-                let _ = app.emit(
-                    "dev_cache_progress",
-                    serde_json::json!({ "currentPath": path }),
-                );
-                last_emit = std::time::Instant::now();
-            }
-        },
-    )
+    let app = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut last_emit = std::time::Instant::now();
+        scan::dev_cache::build_dashboard(
+            &scan_roots,
+            &protected,
+            Some(&DEV_CACHE_CANCEL),
+            |path| {
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                    let _ = app.emit(
+                        "dev_cache_progress",
+                        serde_json::json!({ "currentPath": path }),
+                    );
+                    last_emit = std::time::Instant::now();
+                }
+            },
+        )
+    })
+    .await
+    .expect("dev cache scan task panicked")
 }
 
-fn chrono_like_now() -> String {
-    // Local-ish ISO without extra crate: use UTC offset via Windows localtime is heavy;
-    // store RFC3339-ish UTC from system clock seconds.
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Simple YYYY-MM-DD HH:MM:SS UTC
-    let days = secs / 86400;
-    let tod = secs % 86400;
-    let hour = tod / 3600;
-    let min = (tod % 3600) / 60;
-    let sec = tod % 60;
-    // Civil date from days since epoch (1970-01-01)
-    let (y, m, d) = civil_from_days(days as i64);
-    format!("{y:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02} UTC")
-}
-
+#[cfg(not(windows))]
 fn civil_from_days(days: i64) -> (i32, u32, u32) {
     // Howard Hinnant algorithm
     let z = days + 719468;
@@ -311,8 +362,11 @@ pub fn list_drives() -> Vec<DriveInfo> {
 }
 
 #[tauri::command]
-pub fn analyze_disk_usage(app: AppHandle, drive: Option<String>) -> AnalyzeResult {
-    crate::analyze::analyze_disk_usage(&app, drive)
+pub async fn analyze_disk_usage(app: AppHandle, drive: Option<String>) -> AnalyzeResult {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::analyze::analyze_disk_usage(&app, drive))
+        .await
+        .expect("analyze task panicked")
 }
 
 #[tauri::command]
@@ -326,8 +380,10 @@ pub fn list_startup_items() -> Vec<StartupItem> {
 }
 
 #[tauri::command]
-pub fn get_hardware_info() -> HardwareInfo {
-    hardware::collect()
+pub async fn get_hardware_info() -> HardwareInfo {
+    tauri::async_runtime::spawn_blocking(hardware::collect)
+        .await
+        .expect("hardware info task panicked")
 }
 
 #[tauri::command]
@@ -341,8 +397,10 @@ pub fn list_memory_processes(limit: Option<usize>) -> Vec<ProcessMemoryItem> {
 }
 
 #[tauri::command]
-pub fn clean_memory() -> MemoryCleanReport {
-    memory::clean_memory()
+pub async fn clean_memory() -> MemoryCleanReport {
+    tauri::async_runtime::spawn_blocking(memory::clean_memory)
+        .await
+        .expect("memory clean task panicked")
 }
 
 #[tauri::command]
@@ -404,14 +462,21 @@ fn emit_optimize(app: &AppHandle, phase: OptimizePhase, message: &str) {
 }
 
 #[tauri::command]
-pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
+pub async fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || run_smart_optimize_inner(&app))
+        .await
+        .map_err(|e| format!("优化任务异常: {e}"))?
+}
+
+fn run_smart_optimize_inner(app: &AppHandle) -> Result<OptimizeReport, String> {
     OPTIMIZE_CANCEL.store(false, Ordering::SeqCst);
 
     let cfg = config::load_config();
     let protected = cfg.protected_paths.clone();
     let to_recycle = cfg.to_recycle_bin_by_default;
 
-    emit_optimize(&app, OptimizePhase::Scanning, "正在快速定位可安全清理的缓存…");
+    emit_optimize(app, OptimizePhase::Scanning, "正在快速定位可安全清理的缓存…");
 
     // Lightweight strategy: only known fixed Safe paths (existence check).
     // Avoid project-tree walks, AppData discovery, and recursive dir sizing —
@@ -421,7 +486,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
         if last_emit.elapsed() >= std::time::Duration::from_millis(200) {
             let short = path.rsplit(['\\', '/']).next().unwrap_or(path);
             emit_optimize(
-                &app,
+                app,
                 OptimizePhase::Scanning,
                 &format!("正在检查：{short}"),
             );
@@ -434,7 +499,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
     }
 
     emit_optimize(
-        &app,
+        app,
         OptimizePhase::Cleaning,
         &format!("正在清理 {} 项安全垃圾…", targets.len()),
     );
@@ -456,7 +521,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
             }
             let short = label.rsplit(['\\', '/']).next().unwrap_or(label);
             emit_optimize(
-                &app,
+                app,
                 OptimizePhase::Cleaning,
                 &format!(
                     "清理中 {done}/{total}：{short}（已释放 {}）",
@@ -467,7 +532,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
         };
         // Silent clean_progress (avoids flooding webview); surface coarse optimize_progress.
         clean::run_clean_with_options(
-            &app,
+            app,
             &targets,
             false,
             to_recycle,
@@ -490,7 +555,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
                 .map(|d| d.as_millis())
                 .unwrap_or(0)
         ),
-        timestamp: chrono_like_now(),
+        timestamp: local_timestamp_now(),
         mode: Some("optimize".into()),
         freed_bytes: clean_report.freed_bytes,
         success_count: clean_report.success_count,
@@ -502,7 +567,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
         restored: false,
     });
 
-    emit_optimize(&app, OptimizePhase::Startup, "正在优化开机启动项…");
+    emit_optimize(app, OptimizePhase::Startup, "正在优化开机启动项…");
 
     if optimize_cancelled() {
         return Err("cancelled".into());
@@ -518,7 +583,7 @@ pub fn run_smart_optimize(app: AppHandle) -> Result<OptimizeReport, String> {
         return Err("cancelled".into());
     }
 
-    emit_optimize(&app, OptimizePhase::Done, "体检优化完成");
+    emit_optimize(app, OptimizePhase::Done, "体检优化完成");
 
     Ok(OptimizeReport {
         freed_bytes: clean_report.freed_bytes,

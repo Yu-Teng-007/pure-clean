@@ -15,11 +15,13 @@ import WorkspaceHeader from "./WorkspaceHeader";
 import { showToast } from "./Toast";
 import {
   AppConfig,
+  CATEGORY_ORDER,
   DEFAULT_MIN_FILE_BYTES,
   DEFAULT_STALE_DAYS,
   formatBytes,
   MIN_FILE_PRESETS,
   STALE_DAY_PRESETS,
+  type Category,
 } from "./types";
 
 interface SettingsWorkspaceProps {
@@ -33,11 +35,20 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [categoryLabels, setCategoryLabels] = useState<Record<string, string>>(
+    {},
+  );
 
   const load = useCallback(async () => {
     try {
-      const cfg = await invoke<AppConfig>("load_config");
+      const [cfg, categories] = await Promise.all([
+        invoke<AppConfig>("load_config"),
+        invoke<Array<{ id: string; label: string }>>("get_categories"),
+      ]);
       setConfig(cfg);
+      setCategoryLabels(
+        Object.fromEntries(categories.map((c) => [c.id, c.label])),
+      );
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -125,6 +136,25 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
       ...config,
       protectedPaths: config.protectedPaths.filter((p) => p !== path),
     });
+  };
+
+  const toggleCategory = async (category: Category) => {
+    const enabled = new Set(config.enabledCategories);
+    if (enabled.has(category)) {
+      enabled.delete(category);
+    } else {
+      enabled.add(category);
+    }
+    const next = CATEGORY_ORDER.filter((c) => enabled.has(c));
+    if (next.length === 0) {
+      showToast("至少保留一个扫描类别");
+      return;
+    }
+    await persist({ ...config, enabledCategories: next });
+  };
+
+  const enableAllCategories = async () => {
+    await persist({ ...config, enabledCategories: [...CATEGORY_ORDER] });
   };
 
   return (
@@ -261,6 +291,49 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
               </div>
             </div>
           </div>
+        </section>
+
+        <section
+          className="ws-panel rounded-2xl px-4 py-4 animate-fade-up"
+          style={{ animationDelay: "60ms" }}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+              扫描类别
+            </h2>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void enableAllCategories()}
+              className="btn-press text-[11px] font-medium text-[var(--color-sea)] hover:underline"
+            >
+              全部启用
+            </button>
+          </div>
+          <p className="mt-1 text-[11.5px] text-[var(--color-ink)]/45">
+            全局开关：关闭的类别在所有清理模式中都不会被扫描
+          </p>
+          <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {CATEGORY_ORDER.map((category) => {
+              const checked = config.enabledCategories.includes(category);
+              return (
+                <li key={category}>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-[var(--color-sand)]/60 bg-white/50 px-3 py-2 text-[12px]">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={saving}
+                      onChange={() => void toggleCategory(category)}
+                      className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)]"
+                    />
+                    <span className="min-w-0 leading-snug">
+                      {categoryLabels[category] ?? category}
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
         </section>
 
         <section

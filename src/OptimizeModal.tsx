@@ -392,6 +392,11 @@ export default function OptimizeModal({
                     })}
                   </ul>
                 )}
+
+                <p className="mt-4 rounded-xl border border-[var(--color-sea)]/20 bg-[var(--color-sea)]/6 px-3 py-2.5 text-[12px] leading-relaxed text-[var(--color-ink)]/62">
+                  智能优化仅清理常见安全缓存。如需释放项目构建产物、大文件或 Docker
+                  磁盘等更多空间，请前往首页「清理工具」使用对应场景清理。
+                </p>
               </section>
 
               <section

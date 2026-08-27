@@ -17,9 +17,11 @@
         "title": "净界",
         "width": 1024,
         "height": 768,
+        "minWidth": 800,
+        "minHeight": 600,
         "center": true,
-        "resizable": false,
-        "maximizable": false,
+        "resizable": true,
+        "maximizable": true,
         "decorations": false,
         "shadow": true,
         "backgroundColor": "#f4faf8"

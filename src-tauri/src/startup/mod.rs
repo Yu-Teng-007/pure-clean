@@ -494,3 +494,26 @@ pub fn disable_suggested() -> (Vec<StartupItem>, Vec<StartupItem>, Vec<(String, 
 
     (disabled, skipped, failed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_id_roundtrip_registry_hkcu() {
+        let id = make_id(&StartupLocation::RegistryHkcu, "MyApp");
+        let (loc, name) = parse_id(&id).expect("parse");
+        assert_eq!(loc, StartupLocation::RegistryHkcu);
+        assert_eq!(name, "MyApp");
+    }
+
+    #[test]
+    fn parse_id_rejects_unknown_location() {
+        assert!(parse_id("unknown|foo").is_err());
+    }
+
+    #[test]
+    fn parse_id_rejects_empty_name() {
+        assert!(parse_id("hkcu|").is_err());
+    }
+}

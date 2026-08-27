@@ -123,8 +123,8 @@ export default function Home({ onOpenTool }: HomeProps) {
       setTotalFreedBytes(
         h.reduce((sum, entry) => sum + (entry.dryRun ? 0 : entry.freedBytes), 0),
       );
-    } catch {
-      /* ignore */
+    } catch (e) {
+      showToast(`刷新失败：${String(e)}`);
     } finally {
       setRefreshing(false);
     }
@@ -143,8 +143,8 @@ export default function Home({ onOpenTool }: HomeProps) {
       await invoke("save_config", {
         config: { ...cfg, protectedPaths: next },
       });
-    } catch {
-      /* ignore */
+    } catch (e) {
+      showToast(`保存保护路径失败：${String(e)}`);
     }
   }, []);
 
@@ -163,8 +163,8 @@ export default function Home({ onOpenTool }: HomeProps) {
           h.reduce((sum, entry) => sum + (entry.dryRun ? 0 : entry.freedBytes), 0),
         );
         setProtectedPaths(cfg.protectedPaths ?? []);
-      } catch {
-        /* ignore */
+      } catch (e) {
+        showToast(`加载首页数据失败：${String(e)}`);
       }
     })();
   }, []);

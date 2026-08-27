@@ -180,3 +180,41 @@ fn normalize_path_str(s: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn is_protected_exact_match() {
+        assert!(is_protected(
+            Path::new(r"D:\Projects\secret"),
+            &[r"D:\Projects\secret".into()],
+        ));
+    }
+
+    #[test]
+    fn is_protected_child_path() {
+        assert!(is_protected(
+            Path::new(r"D:\Projects\secret\build\out"),
+            &[r"D:\Projects\Secret".into()],
+        ));
+    }
+
+    #[test]
+    fn is_protected_ignores_unrelated_prefix() {
+        assert!(!is_protected(
+            Path::new(r"D:\Projects\public"),
+            &[r"D:\Projects\secret".into()],
+        ));
+    }
+
+    #[test]
+    fn normalize_path_str_unifies_slashes_and_case() {
+        assert_eq!(
+            normalize_path_str(r"D:/Projects/Code"),
+            r"d:\projects\code"
+        );
+    }
+}

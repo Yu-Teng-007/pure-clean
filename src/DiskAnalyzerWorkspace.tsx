@@ -10,6 +10,7 @@ import {
   SpinnerGap,
 } from "@phosphor-icons/react";
 import WorkspaceHeader from "./WorkspaceHeader";
+import { showToast } from "./Toast";
 import Select from "./Select";
 import type { CleanMode } from "./modes";
 import {
@@ -185,8 +186,8 @@ export default function DiskAnalyzerWorkspace({
         if (list.length > 0 && !list.some((d) => d.name === drive)) {
           setDrive(list[0].name);
         }
-      } catch {
-        /* fallback to C:\ */
+      } catch (e) {
+        showToast(`读取磁盘列表失败：${String(e)}`);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only seed drive on mount

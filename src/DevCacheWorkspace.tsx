@@ -9,6 +9,7 @@ import {
   SpinnerGap,
 } from "@phosphor-icons/react";
 import WorkspaceHeader from "./WorkspaceHeader";
+import { showToast } from "./Toast";
 import type { CleanMode } from "./modes";
 import {
   AppConfig,
@@ -47,8 +48,8 @@ export default function DevCacheWorkspace({
       try {
         const cfg = await invoke<AppConfig>("load_config");
         setRoots(cfg.scanRoots ?? []);
-      } catch {
-        /* ignore */
+      } catch (e) {
+        showToast(`加载扫描根失败：${String(e)}`);
       }
     })();
   }, []);

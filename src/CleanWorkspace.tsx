@@ -359,7 +359,8 @@ export default function CleanWorkspace({
         } else {
           setMinFileBytes(cfg.minFileBytes ?? DEFAULT_MIN_FILE_BYTES);
         }
-      } catch {
+      } catch (e) {
+        showToast(`加载配置失败：${String(e)}`);
         setRoots(initialRoots && initialRoots.length > 0 ? initialRoots : []);
       }
     })();
@@ -402,8 +403,8 @@ export default function CleanWorkspace({
         await invoke("save_config", {
           config: { ...cfg, ...patch },
         });
-      } catch {
-        /* ignore */
+      } catch (e) {
+        showToast(`保存配置失败：${String(e)}`);
       }
     },
     [],
