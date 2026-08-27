@@ -19,6 +19,7 @@ import {
 import ContextMenuOptimizeModal, {
   type ContextMenuOptimizePhase,
 } from "./ContextMenuOptimizeModal";
+import ScrollEdgeFabs from "./ScrollEdgeFabs";
 import WorkspaceHeader from "./WorkspaceHeader";
 import type {
   ContextMenuImpact,
@@ -93,6 +94,7 @@ export default function ContextMenuWorkspace({ onBack }: ContextMenuWorkspacePro
   const [runProgress, setRunProgress] = useState(8);
   const optimizingRef = useRef(false);
   const modalLeavingRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -328,7 +330,11 @@ export default function ContextMenuWorkspace({ onBack }: ContextMenuWorkspacePro
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={scrollRef}
+          className="h-full overflow-y-auto px-6 pb-6 scroll-thin"
+        >
         {error && (
           <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-[var(--color-danger)]">
             {error}
@@ -536,6 +542,12 @@ export default function ContextMenuWorkspace({ onBack }: ContextMenuWorkspacePro
             ))}
           </div>
         )}
+        </div>
+
+        <ScrollEdgeFabs
+          scrollRef={scrollRef}
+          contentKey={`${listFilter}-${filteredItems.length}`}
+        />
       </div>
 
       <ContextMenuOptimizeModal
