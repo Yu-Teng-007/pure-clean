@@ -234,14 +234,14 @@ export default function Home({ onOpenTool }: HomeProps) {
     <div className="home-shell h-full flex flex-col overflow-y-auto">
       <header className="home-header px-7 pt-6 pb-4 animate-fade-up">
         <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+          <div>
             <div className="flex items-center gap-3">
               <AppIcon size={36} className="rounded-[10px] shadow-md ring-1 ring-black/5" />
               <h1 className="text-[1.75rem] font-semibold tracking-[-0.03em] text-[var(--color-ink)] text-balance leading-[1.15]">
                 净界
               </h1>
             </div>
-            <p className="mt-1.5 max-w-[36ch] text-[13.5px] leading-relaxed text-[var(--color-ink)]/60">
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-[var(--color-ink)]/60 whitespace-nowrap">
               {timeGreeting()}，智能优化与按场景清理，安全释放磁盘空间。
             </p>
           </div>
