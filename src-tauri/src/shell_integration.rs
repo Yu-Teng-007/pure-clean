@@ -102,14 +102,6 @@ pub fn take_pending_analyze_path() -> Option<String> {
     value.get("path")?.as_str().map(|s| s.to_string())
 }
 
-/// Re-launch self with --analyze if not already running (for shell menu).
-pub fn ensure_app_running_for_analyze(path: &str) -> Result<(), String> {
-    handle_analyze_arg(path)?;
-    // If we're invoked from Explorer, we're already running — setup handles pending file.
-    // If user wants to open existing instance, they can use single-instance later.
-    Ok(())
-}
-
 pub fn open_services_console() -> Result<(), String> {
     #[cfg(windows)]
     {

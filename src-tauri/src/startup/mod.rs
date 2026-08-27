@@ -115,11 +115,9 @@ fn make_id(location: &StartupLocation, name: &str) -> String {
 }
 
 pub fn parse_id(id: &str) -> Result<(StartupLocation, String), String> {
-    if let Some(name) = id.strip_prefix("task|") {
-        if name.is_empty() {
-            return Err("开机项名称为空".into());
-        }
-        return Ok((StartupLocation::TaskScheduler, name.to_string()));
+    if id.starts_with("task|") {
+        let name = tasks::parse_task_id(id)?;
+        return Ok((StartupLocation::TaskScheduler, name));
     }
     let (loc, name) = id
         .split_once('|')
