@@ -9,11 +9,8 @@ import {
   RocketLaunch,
   X,
 } from "@phosphor-icons/react";
-import {
-  formatBytes,
-  type OptimizeProgress,
-  type OptimizeReport,
-} from "./types";
+import { formatBytes, type OptimizeProgress, type OptimizeReport } from "./types";
+import { showToast } from "./Toast";
 
 type Phase = "idle" | "running" | "done" | "error";
 
@@ -141,6 +138,11 @@ export default function OptimizeModal({
       setProgress({ phase: "done", message: "体检优化完成" });
       setPhase("done");
       onFinishedRef.current?.();
+      if (result.freedBytes > 0) {
+        showToast(`智能优化完成 · 释放 ${formatBytes(result.freedBytes)}`);
+      } else {
+        showToast("智能优化完成");
+      }
     } catch (e) {
       if (cancelledRef.current) return;
       const msg = String(e);

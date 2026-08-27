@@ -12,6 +12,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import WorkspaceHeader from "./WorkspaceHeader";
+import { showToast } from "./Toast";
 import {
   AppConfig,
   DEFAULT_MIN_FILE_BYTES,
@@ -55,6 +56,7 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
       await invoke("save_config", { config: next });
       setConfig(next);
       setMessage(okMsg);
+      showToast(okMsg);
     } catch (e) {
       setError(String(e));
     } finally {

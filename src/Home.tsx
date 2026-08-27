@@ -19,6 +19,8 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { MODAL_OUT_MS, closeWithAnimation } from "./motion";
+import { formatRelativeTime, timeGreeting } from "./formatTime";
+import { showToast } from "./Toast";
 import type { AppTool } from "./appView";
 import AppIcon from "./AppIcon";
 import HistoryDetailModal from "./HistoryDetailModal";
@@ -122,6 +124,12 @@ export default function Home({ onOpenTool }: HomeProps) {
     }
   }, []);
 
+  // keep toast available for refresh feedback
+  const refreshWithToast = useCallback(async () => {
+    await refreshHomeStats();
+    showToast("已刷新磁盘与历史");
+  }, [refreshHomeStats]);
+
   const persistProtected = useCallback(async (next: string[]) => {
     setProtectedPaths(next);
     try {
@@ -154,6 +162,12 @@ export default function Home({ onOpenTool }: HomeProps) {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    const onFocus = () => void refreshHomeStats();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshHomeStats]);
 
   const closeProtect = useCallback(() => {
     if (protectLeaving) return;
@@ -228,13 +242,13 @@ export default function Home({ onOpenTool }: HomeProps) {
               </h1>
             </div>
             <p className="mt-1.5 max-w-[36ch] text-[13.5px] leading-relaxed text-[var(--color-ink)]/60">
-              智能优化与按场景清理，安全释放磁盘空间。
+              {timeGreeting()}，智能优化与按场景清理，安全释放磁盘空间。
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => void refreshHomeStats()}
+              onClick={() => void refreshWithToast()}
               disabled={refreshing}
               className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)] disabled:opacity-50"
               aria-label="刷新数据"
@@ -449,6 +463,12 @@ export default function Home({ onOpenTool }: HomeProps) {
                   const tight = pct >= 90;
                   return (
                     <li key={drive.name}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenTool("diskAnalyzer")}
+                        className="home-drive-row btn-press w-full rounded-xl px-2 py-2 text-left"
+                        title="点击查看磁盘空间分析"
+                      >
                       <div className="mb-1.5 flex items-center justify-between gap-2">
                         <span className="inline-flex min-w-0 items-center gap-2">
                           <span
@@ -464,8 +484,15 @@ export default function Home({ onOpenTool }: HomeProps) {
                             {drive.name}
                           </span>
                         </span>
-                        <span className="shrink-0 text-[11px] font-mono text-[var(--color-ink)]/50">
-                          可用 {formatBytes(drive.freeBytes)}
+                        <span
+                          className={[
+                            "shrink-0 text-[11px] font-mono tabular-nums",
+                            tight
+                              ? "font-semibold text-[var(--color-warn)]"
+                              : "text-[var(--color-ink)]/50",
+                          ].join(" ")}
+                        >
+                          {Math.round(pct)}% 已用
                         </span>
                       </div>
                       <div
@@ -482,8 +509,10 @@ export default function Home({ onOpenTool }: HomeProps) {
                         />
                       </div>
                       <p className="mt-1 text-[10.5px] font-mono text-[var(--color-ink)]/40">
-                        {formatBytes(used)} / {formatBytes(drive.totalBytes)}
+                        可用 {formatBytes(drive.freeBytes)} · {formatBytes(used)} /{" "}
+                        {formatBytes(drive.totalBytes)}
                       </p>
+                      </button>
                     </li>
                   );
                 })}
@@ -534,7 +563,7 @@ export default function Home({ onOpenTool }: HomeProps) {
                         </span>
                       </p>
                       <p className="mt-0.5 text-[11px] font-mono text-[var(--color-ink)]/42">
-                        {h.timestamp}
+                        {formatRelativeTime(h.timestamp)}
                         {h.failureCount > 0
                           ? ` · 失败 ${h.failureCount}`
                           : ` · 成功 ${h.successCount}`}

@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowCounterClockwise, ClockCountdown, X } from "@phosphor-icons/react";
 import { cleanModeLabel } from "./modes";
+import { formatFriendlyTimestamp } from "./formatTime";
 import {
   formatBytes,
   type HistoryEntry,
   type RestoreReport,
 } from "./types";
+import { showToast } from "./Toast";
 
 interface HistoryDetailModalProps {
   open: boolean;
@@ -69,6 +71,7 @@ export default function HistoryDetailModal({
       if (report.restoredCount > 0) {
         setRestoreMsg(`已恢复 ${report.restoredCount} 项`);
         onRestored?.({ ...entry, restored: true });
+        showToast(`已从回收站恢复 ${report.restoredCount} 项`);
       }
       if (report.failures.length > 0) {
         setRestoreError(
@@ -115,8 +118,8 @@ export default function HistoryDetailModal({
               >
                 清理详情
               </h3>
-              <p className="mt-1 text-[12px] font-mono text-[var(--color-ink)]/45">
-                {entry.timestamp}
+              <p className="mt-1 text-[12px] font-mono text-[var(--color-ink)]/45" title={entry.timestamp}>
+                {formatFriendlyTimestamp(entry.timestamp)}
               </p>
             </div>
           </div>

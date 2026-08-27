@@ -4,13 +4,18 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   CaretDown,
+  Copy,
+  FolderOpen,
   FolderSimplePlus,
   MagnifyingGlass,
   ShieldWarning,
   SortDescending,
   X,
 } from "@phosphor-icons/react";
+import { copyText } from "./clipboard";
 import { MODAL_OUT_MS, closeWithAnimation, prefersReducedMotion } from "./motion";
+import { showToast } from "./Toast";
+import { useKeyboardShortcut } from "./useKeyboardShortcut";
 import ScrollEdgeFabs from "./ScrollEdgeFabs";
 import { MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
@@ -41,6 +46,11 @@ import {
 type Phase = "idle" | "scanning" | "ready" | "cleaning" | "done";
 
 const EXIT_MS = 380;
+const SORT_PREF_KEY = "pure-clean-sort-by-size";
+
+function isFilesystemPath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path.trim()) || path.startsWith("\\\\");
+}
 
 function riskLabel(risk: ScanItem["risk"]): string {
   switch (risk) {
@@ -187,12 +197,24 @@ export default function CleanWorkspace({
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
   const [listEpoch, setListEpoch] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBySize, setSortBySize] = useState(true);
+  const [sortBySize, setSortBySize] = useState(() => {
+    try {
+      return localStorage.getItem(SORT_PREF_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [scanBannerDismissed, setScanBannerDismissed] = useState(false);
+  const [lastScanSummary, setLastScanSummary] = useState<{
+    count: number;
+    bytes: number;
+  } | null>(null);
   const [collapsedCategories, setCollapsedCategories] = useState<Set<Category>>(
     () => new Set(),
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [cleanModalOpen, setCleanModalOpen] = useState(false);
   const [cleanModalLeaving, setCleanModalLeaving] = useState(false);
@@ -291,8 +313,24 @@ export default function CleanWorkspace({
   }, [cleanPhase, cleanProgress?.done, cleanProgress?.total]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(SORT_PREF_KEY, String(sortBySize));
+    } catch {
+      /* ignore */
+    }
+  }, [sortBySize]);
+
+  useEffect(() => {
     toRecycleBinRef.current = toRecycleBin;
   }, [toRecycleBin]);
+
+  const revealInExplorer = useCallback(async (path: string) => {
+    try {
+      await invoke("reveal_in_explorer", { path });
+    } catch (e) {
+      showToast(String(e));
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -494,6 +532,11 @@ export default function CleanWorkspace({
       setListEpoch((n) => n + 1);
       setSearchQuery("");
       setCollapsedCategories(new Set());
+      setScanBannerDismissed(false);
+      setLastScanSummary({
+        count: result.items.length,
+        bytes: result.totalBytes,
+      });
       const next = new Set<string>();
       for (const item of result.items) {
         if (
@@ -506,6 +549,13 @@ export default function CleanWorkspace({
       }
       setSelected(next);
       setPhase("ready");
+      if (result.items.length === 0) {
+        showToast("未发现可清理项，可调整阈值后重试");
+      } else {
+        showToast(
+          `发现 ${result.items.length} 项 · ${formatBytes(result.totalBytes)}`,
+        );
+      }
       if (scanCancelledRef.current && result.items.length > 0) {
         setError("扫描已取消，已保留目前发现的结果");
       }
@@ -576,6 +626,11 @@ export default function CleanWorkspace({
     [selectedItems],
   );
 
+  const confirmItems = useMemo(
+    () => [...selectedItems].sort((a, b) => b.bytes - a.bytes),
+    [selectedItems],
+  );
+
   const toggleItem = (id: string) => {
     if (phase === "cleaning") return;
     const item = items.find((i) => i.id === id);
@@ -603,13 +658,23 @@ export default function CleanWorkspace({
 
   const clearSelection = () => setSelected(new Set());
 
-  const selectAllSafe = () => {
+  const selectAllSafe = useCallback(() => {
     setSelected(
       new Set(
-        items.filter((i) => i.risk === "safe" && isSelectable(i)).map((i) => i.id),
+        items
+          .filter((i) => i.risk === "safe" && isSelectable(i))
+          .map((i) => i.id),
       ),
     );
-  };
+  }, [items]);
+
+  useKeyboardShortcut("mod+f", () => searchInputRef.current?.focus(), {
+    enabled: phase === "ready" || phase === "done",
+  });
+
+  useKeyboardShortcut("mod+shift+a", selectAllSafe, {
+    enabled: (phase === "ready" || phase === "done") && !cleanModalOpen,
+  });
 
   const openDiskCleanup = async () => {
     try {
@@ -634,6 +699,18 @@ export default function CleanWorkspace({
       after?.();
     }, MODAL_OUT_MS);
   };
+
+  useEffect(() => {
+    if (!confirmOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeConfirm();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmOpen, confirmLeaving]);
 
   const closeCleanModal = useCallback(() => {
     if (cleaningRef.current || cleanModalLeaving) return;
@@ -770,6 +847,13 @@ export default function CleanWorkspace({
       setPhase("done");
       if (cleanCancelledRef.current) {
         setError("清理已取消，已完成部分项目");
+        showToast("清理已取消，已完成部分项目");
+      } else if (result.freedBytes > 0) {
+        showToast(
+          `已释放 ${formatBytes(result.freedBytes)} · 成功 ${result.successCount} 项`,
+        );
+      } else {
+        showToast(`清理完成 · 成功 ${result.successCount} 项`);
       }
     } catch (e) {
       setError(String(e));
@@ -823,6 +907,7 @@ export default function CleanWorkspace({
     const isSelected = selected.has(item.id);
     const advisory = isAdvisoryOnly(item);
     const opensTool = item.special === "open_disk_cleanup";
+    const canReveal = isFilesystemPath(item.path);
     return (
       <li
         key={`${listEpoch}-${item.id}`}
@@ -904,6 +989,30 @@ export default function CleanWorkspace({
             <p className={`mt-0.5 text-[11px] leading-snug ${scanHintClass(item.hint)}`}>
               {item.hint}
             </p>
+          )}
+        </div>
+        <div className="ws-row-actions flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => void copyText(item.path, "路径已复制")}
+            disabled={phase === "cleaning" || isExiting}
+            className="btn-press rounded-lg p-1.5 text-[var(--color-ink)]/40 hover:bg-white hover:text-[var(--color-sea)] disabled:opacity-30"
+            title="复制路径"
+            aria-label="复制路径"
+          >
+            <Copy size={13} weight="bold" />
+          </button>
+          {canReveal && (
+            <button
+              type="button"
+              onClick={() => void revealInExplorer(item.path)}
+              disabled={phase === "cleaning" || isExiting}
+              className="btn-press rounded-lg p-1.5 text-[var(--color-ink)]/40 hover:bg-white hover:text-[var(--color-sea)] disabled:opacity-30"
+              title="在资源管理器中显示"
+              aria-label="在资源管理器中显示"
+            >
+              <FolderOpen size={13} weight="bold" />
+            </button>
           )}
         </div>
         <span className="text-[13px] font-mono tabular-nums whitespace-nowrap text-[var(--color-ink)]/55">
@@ -1166,10 +1275,11 @@ export default function CleanWorkspace({
                   className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-ink)]/35"
                 />
                 <input
+                  ref={searchInputRef}
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="搜索路径…"
+                  placeholder="搜索路径…（Ctrl+F）"
                   disabled={phase === "cleaning"}
                   className="home-input w-full rounded-xl border border-[var(--color-sand)]/80 bg-white/85 py-1.5 pl-8 pr-3 text-[12.5px] font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
                 />
@@ -1188,6 +1298,33 @@ export default function CleanWorkspace({
                 {visibleItemCount} 项可见
                 {searchQuery.trim() ? ` / ${items.length} 总计` : ""}
               </span>
+            </div>
+          )}
+
+        {lastScanSummary &&
+          !scanBannerDismissed &&
+          (phase === "ready" || phase === "done") &&
+          items.length > 0 && (
+            <div className="ws-scan-banner mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-3.5 py-2.5 animate-fade-up">
+              <p className="text-[12.5px] text-[var(--color-ink)]/70">
+                扫描完成：发现{" "}
+                <span className="font-mono font-semibold text-[var(--color-sea)]">
+                  {lastScanSummary.count}
+                </span>{" "}
+                项，合计{" "}
+                <span className="font-mono font-semibold text-[var(--color-sea)]">
+                  {formatBytes(lastScanSummary.bytes)}
+                </span>
+                。悬停行可复制路径或定位到文件夹。
+              </p>
+              <button
+                type="button"
+                onClick={() => setScanBannerDismissed(true)}
+                className="btn-press shrink-0 rounded-lg p-1 text-[var(--color-ink)]/40 hover:bg-white/80 hover:text-[var(--color-ink)]"
+                aria-label="关闭提示"
+              >
+                <X size={14} weight="bold" />
+              </button>
             </div>
           )}
 
@@ -1354,7 +1491,7 @@ export default function CleanWorkspace({
       {confirmOpen && (
         <div
           className={[
-            "fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-ink)]/40 backdrop-blur-[2px] px-4",
+            "fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-ink)]/40 backdrop-blur-[2px] px-4 py-6",
             confirmLeaving ? "animate-backdrop-out" : "animate-backdrop-in",
           ].join(" ")}
           onClick={() => closeConfirm()}
@@ -1364,77 +1501,111 @@ export default function CleanWorkspace({
             aria-modal="true"
             aria-labelledby="confirm-title"
             className={[
-              "w-full max-w-md rounded-2xl bg-white p-6 shadow-xl",
+              "flex w-full max-w-lg max-h-[min(88vh,640px)] flex-col rounded-2xl bg-white shadow-xl overflow-hidden",
               confirmLeaving ? "animate-modal-out" : "animate-modal-in",
             ].join(" ")}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3
-              id="confirm-title"
-              className="text-lg font-semibold tracking-tight"
-            >
-              确认清理？
-            </h3>
-            <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
-              将{toRecycleBin ? "移入回收站" : "永久删除"}{" "}
-              <strong>{selectedItems.length}</strong> 项，预计释放{" "}
-              <strong className="font-mono">
-                {formatBytes(selectedBytes)}
-              </strong>
-              。缓存类目录通常可安全重建。
-            </p>
-
-            {dangerousSelected.length > 0 && (
-              <div className="mt-3 rounded-xl border border-[var(--color-danger)]/30 bg-red-50 px-3.5 py-3">
-                <p className="text-[12.5px] font-medium text-[var(--color-danger)]">
-                  含 {dangerousSelected.length} 项高风险内容
-                </p>
-                <ul className="mt-1.5 max-h-24 space-y-1 overflow-y-auto">
-                  {dangerousSelected.slice(0, 8).map((i) => (
-                    <li
-                      key={i.id}
-                      className="truncate font-mono text-[11px] text-[var(--color-ink)]/55"
-                      title={i.path}
-                    >
-                      {i.path}
-                    </li>
-                  ))}
-                  {dangerousSelected.length > 8 && (
-                    <li className="text-[11px] text-[var(--color-ink)]/40">
-                      …另有 {dangerousSelected.length - 8} 项
-                    </li>
-                  )}
-                </ul>
-                <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12.5px] text-[var(--color-ink)]/80">
-                  <input
-                    type="checkbox"
-                    checked={dangerousAck}
-                    onChange={(e) => setDangerousAck(e.target.checked)}
-                    className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-danger)] focus:ring-[var(--color-danger)]/30"
-                  />
-                  <span>我了解风险，确认处理这些高风险项</span>
-                </label>
-              </div>
-            )}
-
-            <div className="mt-4 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
-              <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
-                <input
-                  type="checkbox"
-                  checked={toRecycleBin}
-                  onChange={(e) => setToRecycleBin(e.target.checked)}
-                  className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30"
-                />
-                <span>
-                  <span className="font-medium">移到回收站</span>
-                  <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
-                    代替永久删除，可从回收站恢复
-                  </span>
-                </span>
-              </label>
+            <div className="shrink-0 px-6 pt-6 pb-3">
+              <h3
+                id="confirm-title"
+                className="text-lg font-semibold tracking-tight"
+              >
+                确认清理？
+              </h3>
+              <p className="mt-2 text-sm text-[var(--color-ink)]/70 leading-relaxed">
+                将{toRecycleBin ? "移入回收站" : "永久删除"}{" "}
+                <strong>{selectedItems.length}</strong> 项，预计释放{" "}
+                <strong className="font-mono">
+                  {formatBytes(selectedBytes)}
+                </strong>
+                。
+              </p>
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-6 pb-2">
+              <section
+                aria-label="所选清理项"
+                className="rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/35 overflow-hidden"
+              >
+                <div className="flex items-center justify-between gap-2 border-b border-[var(--color-sand)]/50 px-3 py-2">
+                  <p className="text-[12px] font-semibold text-[var(--color-ink)]/75">
+                    所选项目
+                  </p>
+                  <span className="font-mono text-[11px] tabular-nums text-[var(--color-ink)]/45">
+                    {confirmItems.length} 项
+                  </span>
+                </div>
+                <ul className="max-h-52 divide-y divide-[var(--color-sand)]/45 overflow-y-auto scroll-thin">
+                  {confirmItems.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex items-start gap-2.5 px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="truncate font-mono text-[11.5px] text-[var(--color-ink)]/80"
+                          title={item.path}
+                        >
+                          {item.path}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${riskClass(item.risk)}`}
+                          >
+                            {riskLabel(item.risk)}
+                          </span>
+                          {item.categoryLabel && (
+                            <span className="truncate text-[10px] text-[var(--color-ink)]/42">
+                              {item.categoryLabel}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-[var(--color-ink)]/55">
+                        {formatBytes(item.bytes)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              {dangerousSelected.length > 0 && (
+                <div className="mt-3 rounded-xl border border-[var(--color-danger)]/30 bg-red-50 px-3.5 py-3">
+                  <p className="text-[12.5px] font-medium text-[var(--color-danger)]">
+                    含 {dangerousSelected.length} 项高风险内容，请仔细核对
+                  </p>
+                  <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-[12.5px] text-[var(--color-ink)]/80">
+                    <input
+                      type="checkbox"
+                      checked={dangerousAck}
+                      onChange={(e) => setDangerousAck(e.target.checked)}
+                      className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-danger)] focus:ring-[var(--color-danger)]/30"
+                    />
+                    <span>我了解风险，确认处理这些高风险项</span>
+                  </label>
+                </div>
+              )}
+
+              <div className="mt-3 rounded-xl border border-[var(--color-sand)]/70 bg-[var(--color-mist)]/40 p-3.5">
+                <label className="flex cursor-pointer items-start gap-2.5 text-[13px] text-[var(--color-ink)]/80">
+                  <input
+                    type="checkbox"
+                    checked={toRecycleBin}
+                    onChange={(e) => setToRecycleBin(e.target.checked)}
+                    className="mt-0.5 size-3.5 rounded border-[var(--color-sand)] text-[var(--color-sea)] focus:ring-[var(--color-sea)]/30"
+                  />
+                  <span>
+                    <span className="font-medium">移到回收站</span>
+                    <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
+                      代替永久删除，可从回收站恢复
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="shrink-0 flex justify-end gap-2 border-t border-[var(--color-sand)]/50 px-6 py-4">
               <button
                 type="button"
                 onClick={() => closeConfirm()}

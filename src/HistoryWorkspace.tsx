@@ -6,7 +6,9 @@ import HistoryDetailModal from "./HistoryDetailModal";
 import { closeWithAnimation } from "./motion";
 import WorkspaceHeader from "./WorkspaceHeader";
 import { cleanModeLabel } from "./modes";
+import { formatRelativeTime } from "./formatTime";
 import { formatBytes, type HistoryEntry } from "./types";
+import { showToast } from "./Toast";
 
 interface HistoryWorkspaceProps {
   onBack: () => void;
@@ -92,6 +94,7 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
       setError(null);
       setClearConfirmOpen(false);
       setClearConfirmLeaving(false);
+      showToast("已清空清理历史");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -227,7 +230,7 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
                         ) : null}
                       </p>
                       <p className="mt-0.5 font-mono text-[11px] text-[var(--color-ink)]/42">
-                        {h.timestamp}
+                        {formatRelativeTime(h.timestamp)}
                         {h.failureCount > 0
                           ? ` · 失败 ${h.failureCount}`
                           : ` · 成功 ${h.successCount}`}

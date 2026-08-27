@@ -30,10 +30,14 @@ export default function ConfirmDialog({
     if (!open || busy) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        onConfirm();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy, onCancel]);
+  }, [open, busy, onConfirm, onCancel]);
 
   if (!open) return null;
 

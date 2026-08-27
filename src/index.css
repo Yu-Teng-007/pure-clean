@@ -618,6 +618,51 @@ body {
   transform: rotate(-90deg);
 }
 
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.toast-item {
+  animation: toast-in 0.28s var(--ease-out-soft) both;
+}
+
+.home-drive-row {
+  transition:
+    background-color 160ms ease,
+    box-shadow 180ms ease;
+}
+
+.home-drive-row:hover {
+  background: color-mix(in srgb, white 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-sea) 12%, transparent);
+}
+
+.ws-row-actions {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.ws-row:hover .ws-row-actions,
+.ws-row:focus-within .ws-row-actions {
+  opacity: 1;
+}
+
+.ws-scan-banner {
+  border: 1px solid color-mix(in srgb, var(--color-sea) 22%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-sea) 7%, white) 0%,
+    color-mix(in srgb, var(--color-sea) 3%, white) 100%
+  );
+}
+
 /* ——— workspace ——— */
 .ws-mode-icon {
   color: var(--color-sea);
@@ -995,7 +1040,8 @@ body {
   .animate-spin-orbit,
   .ui-select__menu--in,
   .ui-select__menu--out,
-  .ui-select__caret {
+  .ui-select__caret,
+  .toast-item {
     animation: none !important;
     transition: none !important;
   }

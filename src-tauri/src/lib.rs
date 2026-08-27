@@ -34,6 +34,7 @@ pub fn run() {
             commands::restore_history,
             commands::open_recycle_bin,
             commands::open_disk_cleanup,
+            commands::reveal_in_explorer,
             commands::format_bytes,
             commands::list_drives,
             commands::analyze_disk_usage,

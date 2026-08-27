@@ -37,6 +37,7 @@ export default function TitleBar() {
       <div
         data-tauri-drag-region
         className="flex-1 min-w-0 flex items-center gap-2 pl-3.5"
+        onDoubleClick={() => void win().toggleMaximize()}
       >
         <AppIcon size={15} className="rounded-[4px] shadow-sm" />
         <span

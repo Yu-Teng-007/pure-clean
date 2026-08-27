@@ -233,6 +233,11 @@ pub fn open_disk_cleanup(drive: Option<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    crate::system_tools::reveal_in_explorer(path)
+}
+
+#[tauri::command]
 pub fn clear_history() -> Result<(), String> {
     history::clear_history()
 }
