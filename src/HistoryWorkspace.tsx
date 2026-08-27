@@ -1,22 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ClockCountdown, Trash } from "@phosphor-icons/react";
+import { ClockCountdown, MagnifyingGlass, Trash } from "@phosphor-icons/react";
+import ConfirmDialog from "./ConfirmDialog";
 import HistoryDetailModal from "./HistoryDetailModal";
+import { closeWithAnimation } from "./motion";
 import WorkspaceHeader from "./WorkspaceHeader";
 import { cleanModeLabel } from "./modes";
 import { formatBytes, type HistoryEntry } from "./types";
 
 interface HistoryWorkspaceProps {
   onBack: () => void;
-}
-
-const MODAL_OUT_MS = 180;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
 }
 
 type FilterMode = "all" | "optimize" | "clean";
@@ -29,6 +22,9 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLeaving, setDetailLeaving] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearConfirmLeaving, setClearConfirmLeaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -45,12 +41,24 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
   }, [load]);
 
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return history.filter((h) => {
-      if (filter === "optimize") return h.mode === "optimize";
-      if (filter === "clean") return h.mode !== "optimize";
-      return true;
+      if (filter === "optimize" && h.mode !== "optimize") return false;
+      if (filter === "clean" && h.mode === "optimize") return false;
+      if (!q) return true;
+      const label = cleanModeLabel(h.mode).toLowerCase();
+      return label.includes(q) || h.timestamp.toLowerCase().includes(q);
     });
-  }, [history, filter]);
+  }, [history, filter, searchQuery]);
+
+  const stats = useMemo(() => {
+    const real = history.filter((h) => !h.dryRun);
+    return {
+      totalFreed: real.reduce((s, h) => s + h.freedBytes, 0),
+      totalSuccess: real.reduce((s, h) => s + h.successCount, 0),
+      totalFailed: real.reduce((s, h) => s + h.failureCount, 0),
+    };
+  }, [history]);
 
   const openDetail = (entry: HistoryEntry) => {
     setDetail(entry);
@@ -60,28 +68,30 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
 
   const closeDetail = useCallback(() => {
     if (detailLeaving) return;
-    if (prefersReducedMotion()) {
+    closeWithAnimation(setDetailLeaving, () => {
       setDetailOpen(false);
       setDetailLeaving(false);
       setDetail(null);
-      return;
-    }
-    setDetailLeaving(true);
-    window.setTimeout(() => {
-      setDetailOpen(false);
-      setDetailLeaving(false);
-      setDetail(null);
-    }, MODAL_OUT_MS);
+    });
   }, [detailLeaving]);
+
+  const closeClearConfirm = useCallback(() => {
+    if (clearConfirmLeaving || clearing) return;
+    closeWithAnimation(setClearConfirmLeaving, () => {
+      setClearConfirmOpen(false);
+      setClearConfirmLeaving(false);
+    });
+  }, [clearConfirmLeaving, clearing]);
 
   const clearAll = async () => {
     if (!history.length) return;
-    if (!window.confirm("确定清空全部清理历史？此操作不可撤销。")) return;
     setClearing(true);
     try {
       await invoke("clear_history");
       setHistory([]);
       setError(null);
+      setClearConfirmOpen(false);
+      setClearConfirmLeaving(false);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -106,7 +116,10 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
           <button
             type="button"
             disabled={!history.length || clearing}
-            onClick={() => void clearAll()}
+            onClick={() => {
+              setClearConfirmLeaving(false);
+              setClearConfirmOpen(true);
+            }}
             className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white/70 px-3 py-1.5 text-[12px] font-medium text-[var(--color-ink)]/70 hover:bg-white disabled:opacity-40"
           >
             <Trash size={14} weight="bold" />
@@ -115,8 +128,34 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-7 pb-7">
-        <div className="mb-4 flex flex-wrap gap-1.5 animate-fade-up">
+      <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-7 pb-7">
+        {history.length > 0 && (
+          <div
+            className="mb-4 grid grid-cols-3 gap-2.5 animate-fade-up"
+            aria-label="历史统计"
+          >
+            <div className="home-stat rounded-2xl px-3.5 py-3">
+              <p className="text-[10.5px] text-[var(--color-ink)]/45">累计释放</p>
+              <p className="mt-0.5 font-mono text-[14px] font-semibold tabular-nums text-[var(--color-sea)]">
+                {formatBytes(stats.totalFreed)}
+              </p>
+            </div>
+            <div className="home-stat rounded-2xl px-3.5 py-3">
+              <p className="text-[10.5px] text-[var(--color-ink)]/45">成功项</p>
+              <p className="mt-0.5 font-mono text-[14px] font-semibold tabular-nums text-[var(--color-ink)]">
+                {stats.totalSuccess}
+              </p>
+            </div>
+            <div className="home-stat rounded-2xl px-3.5 py-3">
+              <p className="text-[10.5px] text-[var(--color-ink)]/45">失败项</p>
+              <p className="mt-0.5 font-mono text-[14px] font-semibold tabular-nums text-[var(--color-danger)]">
+                {stats.totalFailed}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4 flex flex-wrap items-center gap-2 animate-fade-up">
           {filters.map((f) => (
             <button
               key={f.id}
@@ -132,6 +171,22 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
               {f.label}
             </button>
           ))}
+          {history.length > 3 && (
+            <div className="relative ml-auto min-w-[10rem] flex-1 max-w-xs">
+              <MagnifyingGlass
+                size={14}
+                weight="bold"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-ink)]/35"
+              />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索记录…"
+                className="home-input w-full rounded-xl border border-[var(--color-sand)] bg-white/85 py-1.5 pl-8 pr-3 text-[12px] outline-none focus:border-[var(--color-sea-bright)]"
+              />
+            </div>
+          )}
         </div>
 
         {error && (
@@ -200,6 +255,23 @@ export default function HistoryWorkspace({ onBack }: HistoryWorkspaceProps) {
             prev.map((h) => (h.id === updated.id ? updated : h)),
           );
         }}
+      />
+
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        leaving={clearConfirmLeaving}
+        title="清空全部历史？"
+        description={
+          <>
+            将删除全部 {history.length} 条清理记录，此操作不可撤销。
+            已清理的文件不会因此恢复。
+          </>
+        }
+        confirmLabel="清空历史"
+        variant="danger"
+        busy={clearing}
+        onConfirm={() => void clearAll()}
+        onCancel={closeClearConfirm}
       />
     </div>
   );

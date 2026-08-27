@@ -272,7 +272,7 @@ export default function OptimizeModal({
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 pb-5">
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 pb-5">
           {(phase === "idle" || phase === "running" || phase === "done") && (
             <div className="space-y-3 animate-fade-up">
               <div className="flex flex-wrap gap-2">

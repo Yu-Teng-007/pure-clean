@@ -4,8 +4,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   FolderSimplePlus,
   GearSix,
+  HardDrives,
+  Recycle,
   ShieldWarning,
   Trash,
+  Wrench,
   X,
 } from "@phosphor-icons/react";
 import WorkspaceHeader from "./WorkspaceHeader";
@@ -308,6 +311,39 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
               ))
             )}
           </ul>
+        </section>
+
+        <section
+          className="ws-panel rounded-2xl px-4 py-4 animate-fade-up"
+          style={{ animationDelay: "160ms" }}
+        >
+          <div className="flex items-center gap-2">
+            <Wrench size={15} weight="duotone" className="text-[var(--color-sea)]" />
+            <h2 className="text-[13px] font-semibold text-[var(--color-ink)]">
+              系统工具
+            </h2>
+          </div>
+          <p className="mt-1 text-[11.5px] text-[var(--color-ink)]/45">
+            调用 Windows 内置工具，处理 WinSxS 等需系统级清理的场景
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void invoke("open_disk_cleanup", { drive: null }).catch((e) => setError(String(e)))}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              <HardDrives size={14} weight="duotone" />
+              打开磁盘清理
+            </button>
+            <button
+              type="button"
+              onClick={() => void invoke("open_recycle_bin").catch((e) => setError(String(e)))}
+              className="btn-press inline-flex items-center gap-1.5 rounded-xl border border-[var(--color-sand)] bg-white px-3 py-2 text-[12px] font-medium hover:bg-[var(--color-mist)]"
+            >
+              <Recycle size={14} weight="duotone" />
+              打开回收站
+            </button>
+          </div>
         </section>
 
         <section

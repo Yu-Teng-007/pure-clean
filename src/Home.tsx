@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ArrowRight,
+  ArrowsClockwise,
   Broom,
   ChartBar,
   ChartPie,
@@ -15,7 +16,9 @@ import {
   Memory,
   RocketLaunch,
   ShieldWarning,
+  WarningCircle,
 } from "@phosphor-icons/react";
+import { MODAL_OUT_MS, closeWithAnimation } from "./motion";
 import type { AppTool } from "./appView";
 import AppIcon from "./AppIcon";
 import HistoryDetailModal from "./HistoryDetailModal";
@@ -76,23 +79,17 @@ const HOME_TOOLS: {
   },
 ];
 
-const MODAL_OUT_MS = 180;
-
 function driveLetter(name: string): string {
   const m = name.trim().match(/^([A-Za-z]):/);
   return m ? m[1].toUpperCase() : name.slice(0, 1).toUpperCase() || "?";
 }
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
 export default function Home({ onOpenTool }: HomeProps) {
   const [drives, setDrives] = useState<DriveInfo[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [totalFreedBytes, setTotalFreedBytes] = useState(0);
+  const [historyCount, setHistoryCount] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [protectedPaths, setProtectedPaths] = useState<string[]>([]);
   const [protectInput, setProtectInput] = useState("");
   const [protectOpen, setProtectOpen] = useState(false);
@@ -106,6 +103,7 @@ export default function Home({ onOpenTool }: HomeProps) {
   const [historyDetailLeaving, setHistoryDetailLeaving] = useState(false);
 
   const refreshHomeStats = useCallback(async () => {
+    setRefreshing(true);
     try {
       const [d, h] = await Promise.all([
         invoke<DriveInfo[]>("list_drives"),
@@ -113,8 +111,14 @@ export default function Home({ onOpenTool }: HomeProps) {
       ]);
       setDrives(d);
       setHistory(h.slice(0, 3));
+      setHistoryCount(h.length);
+      setTotalFreedBytes(
+        h.reduce((sum, entry) => sum + (entry.dryRun ? 0 : entry.freedBytes), 0),
+      );
     } catch {
       /* ignore */
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
@@ -140,6 +144,10 @@ export default function Home({ onOpenTool }: HomeProps) {
         ]);
         setDrives(d);
         setHistory(h.slice(0, 3));
+        setHistoryCount(h.length);
+        setTotalFreedBytes(
+          h.reduce((sum, entry) => sum + (entry.dryRun ? 0 : entry.freedBytes), 0),
+        );
         setProtectedPaths(cfg.protectedPaths ?? []);
       } catch {
         /* ignore */
@@ -149,30 +157,18 @@ export default function Home({ onOpenTool }: HomeProps) {
 
   const closeProtect = useCallback(() => {
     if (protectLeaving) return;
-    if (prefersReducedMotion()) {
+    closeWithAnimation(setProtectLeaving, () => {
       setProtectOpen(false);
       setProtectLeaving(false);
-      return;
-    }
-    setProtectLeaving(true);
-    window.setTimeout(() => {
-      setProtectOpen(false);
-      setProtectLeaving(false);
-    }, MODAL_OUT_MS);
+    });
   }, [protectLeaving]);
 
   const closeOptimize = useCallback(() => {
     if (optimizeLeaving) return;
-    if (prefersReducedMotion()) {
+    closeWithAnimation(setOptimizeLeaving, () => {
       setOptimizeOpen(false);
       setOptimizeLeaving(false);
-      return;
-    }
-    setOptimizeLeaving(true);
-    window.setTimeout(() => {
-      setOptimizeOpen(false);
-      setOptimizeLeaving(false);
-    }, MODAL_OUT_MS);
+    });
   }, [optimizeLeaving]);
 
   const openHistoryDetail = useCallback((entry: HistoryEntry) => {
@@ -183,19 +179,18 @@ export default function Home({ onOpenTool }: HomeProps) {
 
   const closeHistoryDetail = useCallback(() => {
     if (historyDetailLeaving) return;
-    if (prefersReducedMotion()) {
+    closeWithAnimation(setHistoryDetailLeaving, () => {
       setHistoryDetailOpen(false);
       setHistoryDetailLeaving(false);
       setHistoryDetail(null);
-      return;
-    }
-    setHistoryDetailLeaving(true);
-    window.setTimeout(() => {
-      setHistoryDetailOpen(false);
-      setHistoryDetailLeaving(false);
-      setHistoryDetail(null);
-    }, MODAL_OUT_MS);
+    });
   }, [historyDetailLeaving]);
+
+  const tightDrives = drives.filter((drive) => {
+    const used = Math.max(0, drive.totalBytes - drive.freeBytes);
+    const pct = drive.totalBytes > 0 ? (used / drive.totalBytes) * 100 : 0;
+    return pct >= 90;
+  });
 
   useEffect(() => {
     if (!protectOpen || optimizeOpen) return;
@@ -239,6 +234,20 @@ export default function Home({ onOpenTool }: HomeProps) {
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
+              onClick={() => void refreshHomeStats()}
+              disabled={refreshing}
+              className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)] disabled:opacity-50"
+              aria-label="刷新数据"
+              title="刷新磁盘与历史"
+            >
+              <ArrowsClockwise
+                size={15}
+                weight="bold"
+                className={refreshing ? "animate-spin-orbit" : ""}
+              />
+            </button>
+            <button
+              type="button"
               onClick={() => onOpenTool("settings")}
               className="btn-press inline-flex items-center gap-2 rounded-xl border border-[var(--color-sand)]/80 bg-white/55 px-3 py-2 text-xs font-medium text-[var(--color-ink)]/75 hover:bg-white/80 hover:text-[var(--color-ink)]"
             >
@@ -265,6 +274,81 @@ export default function Home({ onOpenTool }: HomeProps) {
 
       <div className="home-grid flex-1 px-7 pb-7 min-h-0">
         <main className="home-main min-w-0 flex flex-col gap-5">
+          {(historyCount > 0 || tightDrives.length > 0) && (
+            <section
+              className="animate-fade-up flex flex-wrap gap-2.5"
+              style={{ animationDelay: "30ms" }}
+              aria-label="概览"
+            >
+              {historyCount > 0 && (
+                <div className="home-stat flex min-w-[9rem] flex-1 items-center gap-3 rounded-2xl px-4 py-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
+                    <Broom size={18} weight="duotone" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] text-[var(--color-ink)]/45">
+                      累计释放
+                    </span>
+                    <span className="home-stat__value block font-mono text-[15px] font-semibold text-[var(--color-sea)]">
+                      {formatBytes(totalFreedBytes)}
+                    </span>
+                  </span>
+                </div>
+              )}
+              {historyCount > 0 && (
+                <div className="home-stat flex min-w-[9rem] flex-1 items-center gap-3 rounded-2xl px-4 py-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-sea)]/10 text-[var(--color-sea)]">
+                    <ClockCountdown size={18} weight="duotone" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] text-[var(--color-ink)]/45">
+                      清理次数
+                    </span>
+                    <span className="home-stat__value block font-mono text-[15px] font-semibold text-[var(--color-ink)]">
+                      {historyCount} 次
+                    </span>
+                  </span>
+                </div>
+              )}
+            </section>
+          )}
+
+          {tightDrives.length > 0 && (
+            <section
+              className="home-warning animate-fade-up rounded-2xl px-4 py-3.5"
+              style={{ animationDelay: "40ms" }}
+              aria-label="磁盘空间预警"
+            >
+              <div className="flex flex-wrap items-start gap-3 justify-between">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <WarningCircle
+                    size={20}
+                    weight="duotone"
+                    className="mt-0.5 shrink-0 text-[var(--color-warn)]"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-[var(--color-ink)]">
+                      {tightDrives.length === 1
+                        ? `${tightDrives[0].name} 空间不足`
+                        : `${tightDrives.length} 个磁盘空间不足`}
+                    </p>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-[var(--color-ink)]/55">
+                      可用空间低于 10%，建议分析占用或执行清理。
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onOpenTool("diskAnalyzer")}
+                  className="btn-press inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-[12px] font-semibold text-[var(--color-warn)] hover:bg-[var(--color-foam)]"
+                >
+                  分析磁盘
+                  <ArrowRight size={12} weight="bold" />
+                </button>
+              </div>
+            </section>
+          )}
+
           <section
             className="animate-fade-up"
             style={{ animationDelay: "50ms" }}

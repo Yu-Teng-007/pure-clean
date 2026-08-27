@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { Broom, CheckCircle, X } from "@phosphor-icons/react";
+import { invoke } from "@tauri-apps/api/core";
+import { Broom, CheckCircle, Recycle, X } from "@phosphor-icons/react";
 import { formatBytes, type CleanProgress, type CleanReport } from "./types";
 
 export type DiskCleanPhase = "running" | "done" | "error";
@@ -118,7 +119,7 @@ export default function CleanProgressModal({
           </button>
         </div>
 
-        <div className="px-5 pb-5 space-y-4 overflow-y-auto">
+        <div className="px-5 pb-5 space-y-4 overflow-y-auto scroll-thin">
           {(phase === "running" || phase === "done") && (
             <div className="space-y-3 animate-fade-up">
               <div className="flex flex-wrap gap-2">
@@ -304,13 +305,25 @@ export default function CleanProgressModal({
                 </p>
               </section>
 
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn-press w-full rounded-xl bg-[var(--color-sea)] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
-              >
-                完成
-              </button>
+              <div className="flex flex-col gap-2">
+                {report.toRecycleBin && (
+                  <button
+                    type="button"
+                    onClick={() => void invoke("open_recycle_bin").catch(() => {})}
+                    className="btn-press w-full rounded-xl border border-[var(--color-sand)] px-4 py-2 text-[12.5px] font-medium text-[var(--color-ink)]/70 hover:bg-[var(--color-mist)]"
+                  >
+                    <Recycle size={15} weight="duotone" className="inline mr-1.5 -mt-px" />
+                    打开系统回收站
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="btn-press w-full rounded-xl bg-[var(--color-sea)] px-4 py-2.5 text-[13px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
+                >
+                  完成
+                </button>
+              </div>
             </div>
           )}
         </div>

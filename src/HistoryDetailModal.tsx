@@ -98,7 +98,7 @@ export default function HistoryDetailModal({
         aria-modal="true"
         aria-labelledby="history-detail-title"
         className={[
-          "w-full max-w-md rounded-2xl bg-white p-5 shadow-xl",
+          "w-full max-w-md rounded-2xl bg-white p-5 shadow-xl max-h-[min(88vh,640px)] overflow-y-auto scroll-thin",
           leaving ? "animate-modal-out" : "animate-modal-in",
         ].join(" ")}
         onClick={(e) => e.stopPropagation()}

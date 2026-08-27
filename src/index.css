@@ -80,7 +80,7 @@ body {
   background: #b42517;
 }
 
-/* ——— scrollbars (hidden, scroll still works) ——— */
+/* ——— scrollbars (hidden by default, scroll still works) ——— */
 * {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -90,6 +90,27 @@ body {
   display: none;
   width: 0;
   height: 0;
+}
+
+/* Thin scrollbars for modal / long lists */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-sand) 80%, transparent) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  display: block;
+  width: 5px;
+  height: 5px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-sand) 85%, var(--color-ink));
+}
+
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ——— entrances ——— */
@@ -564,6 +585,37 @@ body {
 
 .home-disk-fill--tight {
   background: linear-gradient(90deg, #b45309 0%, #d97706 100%);
+}
+
+.home-stat {
+  border: 1px solid color-mix(in srgb, var(--color-sand) 65%, transparent);
+  background: color-mix(in srgb, white 55%, transparent);
+}
+
+.home-stat__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.home-warning {
+  border: 1px solid color-mix(in srgb, var(--color-warn) 35%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-warn) 8%, white) 0%,
+    color-mix(in srgb, var(--color-warn) 4%, white) 100%
+  );
+}
+
+.ws-toolbar {
+  border: 1px solid color-mix(in srgb, var(--color-sand) 70%, transparent);
+  background: color-mix(in srgb, white 62%, transparent);
+}
+
+.ws-category-toggle {
+  transition: transform 160ms var(--ease-out);
+}
+
+.ws-category-toggle--collapsed {
+  transform: rotate(-90deg);
 }
 
 /* ——— workspace ——— */

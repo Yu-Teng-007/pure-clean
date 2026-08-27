@@ -3,11 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  CaretDown,
   FolderSimplePlus,
   MagnifyingGlass,
   ShieldWarning,
+  SortDescending,
   X,
 } from "@phosphor-icons/react";
+import { MODAL_OUT_MS, closeWithAnimation, prefersReducedMotion } from "./motion";
+import ScrollEdgeFabs from "./ScrollEdgeFabs";
 import { MODES, type CleanMode } from "./modes";
 import { MODE_ICONS } from "./modeIcons";
 import ProtectPathsModal from "./ProtectPathsModal";
@@ -37,7 +41,6 @@ import {
 type Phase = "idle" | "scanning" | "ready" | "cleaning" | "done";
 
 const EXIT_MS = 380;
-const MODAL_OUT_MS = 180;
 
 function riskLabel(risk: ScanItem["risk"]): string {
   switch (risk) {
@@ -66,13 +69,6 @@ function scanHintClass(hint: string): string {
     return "text-[var(--color-warn)]";
   }
   return "text-[var(--color-ink)]/48";
-}
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
 }
 
 function defaultThresholdBytes(mode: CleanMode): number {
@@ -190,6 +186,13 @@ export default function CleanWorkspace({
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [goneIds, setGoneIds] = useState<Set<string>>(new Set());
   const [listEpoch, setListEpoch] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBySize, setSortBySize] = useState(true);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<Category>>(
+    () => new Set(),
+  );
+
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const [cleanModalOpen, setCleanModalOpen] = useState(false);
   const [cleanModalLeaving, setCleanModalLeaving] = useState(false);
@@ -442,16 +445,10 @@ export default function CleanWorkspace({
 
   const closeProtect = useCallback(() => {
     if (protectLeaving) return;
-    if (prefersReducedMotion()) {
+    closeWithAnimation(setProtectLeaving, () => {
       setProtectOpen(false);
       setProtectLeaving(false);
-      return;
-    }
-    setProtectLeaving(true);
-    window.setTimeout(() => {
-      setProtectOpen(false);
-      setProtectLeaving(false);
-    }, MODAL_OUT_MS);
+    });
   }, [protectLeaving]);
 
   useEffect(() => {
@@ -495,6 +492,8 @@ export default function CleanWorkspace({
       });
       setItems(result.items);
       setListEpoch((n) => n + 1);
+      setSearchQuery("");
+      setCollapsedCategories(new Set());
       const next = new Set<string>();
       for (const item of result.items) {
         if (
@@ -524,13 +523,36 @@ export default function CleanWorkspace({
   const grouped = useMemo(() => {
     const map = new Map<Category, ScanItem[]>();
     for (const cat of CATEGORY_ORDER) map.set(cat, []);
+    const q = searchQuery.trim().toLowerCase();
     for (const item of items) {
+      if (q && !item.path.toLowerCase().includes(q)) continue;
       const list = map.get(item.category) ?? [];
       list.push(item);
       map.set(item.category, list);
     }
-    return [...map.entries()].filter(([, list]) => list.length > 0);
-  }, [items]);
+    return [...map.entries()]
+      .filter(([, list]) => list.length > 0)
+      .map(([category, list]) => {
+        const sorted = sortBySize
+          ? [...list].sort((a, b) => b.bytes - a.bytes)
+          : list;
+        return [category, sorted] as const;
+      });
+  }, [items, searchQuery, sortBySize]);
+
+  const visibleItemCount = useMemo(
+    () => grouped.reduce((sum, [, list]) => sum + list.length, 0),
+    [grouped],
+  );
+
+  const toggleCategoryCollapse = (category: Category) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+  };
 
   const selectedItems = useMemo(
     () =>
@@ -1116,8 +1138,9 @@ export default function CleanWorkspace({
       </section>
 
       <main
+        ref={scrollRef}
         className={[
-          "flex-1 min-h-0 px-7 overflow-auto",
+          "relative flex-1 min-h-0 px-7 overflow-auto scroll-thin",
           showFooter ? "pb-28" : "pb-7",
         ].join(" ")}
       >
@@ -1133,6 +1156,56 @@ export default function CleanWorkspace({
           </div>
         )}
 
+        {(phase === "ready" || phase === "done" || phase === "cleaning") &&
+          items.length > 0 && (
+            <div className="ws-toolbar mb-4 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5">
+              <div className="relative min-w-[10rem] flex-1">
+                <MagnifyingGlass
+                  size={14}
+                  weight="bold"
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-ink)]/35"
+                />
+                <input
+                  type="search"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜索路径…"
+                  disabled={phase === "cleaning"}
+                  className="home-input w-full rounded-xl border border-[var(--color-sand)]/80 bg-white/85 py-1.5 pl-8 pr-3 text-[12.5px] font-mono outline-none focus:border-[var(--color-sea-bright)] disabled:opacity-50"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortBySize((v) => !v)}
+                disabled={phase === "cleaning"}
+                className={chipClass(sortBySize)}
+                title="按体积从大到小排序"
+              >
+                <SortDescending size={13} weight="bold" className="inline mr-1 -mt-px" />
+                按大小
+              </button>
+              <span className="text-[11px] font-mono text-[var(--color-ink)]/45 tabular-nums">
+                {visibleItemCount} 项可见
+                {searchQuery.trim() ? ` / ${items.length} 总计` : ""}
+              </span>
+            </div>
+          )}
+
+        {searchQuery.trim() && visibleItemCount === 0 && items.length > 0 && (
+          <div className="ws-empty mb-4 rounded-2xl px-6 py-10 text-center">
+            <p className="text-[13px] text-[var(--color-ink)]/50">
+              没有匹配「{searchQuery}」的结果
+            </p>
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="btn-press mt-2 text-[12px] font-medium text-[var(--color-sea)] hover:underline"
+            >
+              清除搜索
+            </button>
+          </div>
+        )}
+
         <div className="space-y-4">
           {grouped.map(([category, catItems]) => {
             const visibleItems = catItems.filter((i) => !goneIds.has(i.id));
@@ -1145,6 +1218,7 @@ export default function CleanWorkspace({
             const allOn =
               selectable.length > 0 &&
               selectable.every((i) => selected.has(i.id));
+            const collapsed = collapsedCategories.has(category);
 
             const dupeGroups =
               category === "duplicate_files"
@@ -1163,15 +1237,31 @@ export default function CleanWorkspace({
             return (
               <section key={category}>
                 <div className="flex items-center justify-between mb-2 px-0.5 gap-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <h2 className="text-[13px] font-semibold tracking-tight text-[var(--color-ink)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleCategoryCollapse(category)}
+                      className="btn-press inline-flex size-6 shrink-0 items-center justify-center rounded-lg text-[var(--color-ink)]/45 hover:bg-white/70 hover:text-[var(--color-ink)]"
+                      aria-expanded={!collapsed}
+                      aria-label={collapsed ? "展开分类" : "折叠分类"}
+                    >
+                      <CaretDown
+                        size={14}
+                        weight="bold"
+                        className={[
+                          "ws-category-toggle",
+                          collapsed ? "ws-category-toggle--collapsed" : "",
+                        ].join(" ")}
+                      />
+                    </button>
+                    <h2 className="text-[13px] font-semibold tracking-tight text-[var(--color-ink)] truncate">
                       {label}
                     </h2>
                     <button
                       type="button"
                       onClick={() => toggleCategory(catItems, !allOn)}
-                      disabled={phase === "cleaning"}
-                      className="btn-press text-xs text-[var(--color-sea)] hover:underline disabled:opacity-40"
+                      disabled={phase === "cleaning" || collapsed}
+                      className="btn-press shrink-0 text-xs text-[var(--color-sea)] hover:underline disabled:opacity-40"
                     >
                       {allOn ? "取消全选" : "全选"}
                     </button>
@@ -1181,6 +1271,8 @@ export default function CleanWorkspace({
                   </span>
                 </div>
 
+                {!collapsed && (
+                  <>
                 {dupeGroups ? (
                   <div className="space-y-2.5">
                     {dupeGroups.map(([gid, group]) => (
@@ -1203,11 +1295,17 @@ export default function CleanWorkspace({
                     {visibleItems.map((item) => renderItemRow(item))}
                   </ul>
                 )}
+                  </>
+                )}
               </section>
             );
           })}
         </div>
         </div>
+        <ScrollEdgeFabs
+          scrollRef={scrollRef}
+          contentKey={`${listEpoch}-${visibleItemCount}-${phase}`}
+        />
       </main>
 
       {showFooter && (
