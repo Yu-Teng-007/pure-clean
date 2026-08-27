@@ -11,13 +11,14 @@ use crate::history;
 use crate::memory::{self, MemoryCleanReport, MemorySnapshot, ProcessMemoryItem};
 use crate::model::{
     AnalyzeResult, BlockingProcess, Category, CleanReport, CleanRequest, CleanTarget,
-    DevCacheDashboard, DriveInfo, HistoryCleanedItem, HistoryEntry, OptimizePhase, OptimizeProgress,
-    OptimizeReport, RestoreReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
-    StartupOptimizeReport,
+    ContextMenuOptimizeReport, DevCacheDashboard, DriveInfo, HistoryCleanedItem, HistoryEntry,
+    OptimizePhase, OptimizeProgress, OptimizeReport, RestoreReport, ScanRequest, ScanResult,
+    ScanRoot, StartupFailure, StartupOptimizeReport,
 };
 use crate::process_lock;
 use crate::recycle_restore;
 use crate::scan;
+use crate::context_menu::{self, ContextMenuItem};
 use crate::startup::{self, StartupItem};
 
 /// Cooperative cancel flag for in-flight smart optimize.
@@ -362,6 +363,30 @@ pub fn run_startup_smart_optimize() -> Result<StartupOptimizeReport, String> {
         .map(|(name, error)| StartupFailure { name, error })
         .collect();
     Ok(StartupOptimizeReport {
+        disabled,
+        skipped,
+        failed,
+    })
+}
+
+#[tauri::command]
+pub fn list_context_menu_items() -> Vec<ContextMenuItem> {
+    context_menu::list_context_menu_items()
+}
+
+#[tauri::command]
+pub fn set_context_menu_enabled(id: String, enabled: bool) -> Result<ContextMenuItem, String> {
+    context_menu::set_context_menu_enabled(&id, enabled)
+}
+
+#[tauri::command]
+pub fn run_context_menu_smart_optimize() -> Result<ContextMenuOptimizeReport, String> {
+    let (disabled, skipped, failed_pairs) = context_menu::disable_suggested();
+    let failed: Vec<StartupFailure> = failed_pairs
+        .into_iter()
+        .map(|(name, error)| StartupFailure { name, error })
+        .collect();
+    Ok(ContextMenuOptimizeReport {
         disabled,
         skipped,
         failed,

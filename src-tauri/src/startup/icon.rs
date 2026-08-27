@@ -215,3 +215,29 @@ pub fn icon_data_url_for_command(command: &str) -> Option<String> {
     let path = path_from_command(command)?;
     icon_data_url_for_path(&path)
 }
+
+/// Extract icon at a specific index from an executable / DLL (Shell DefaultIcon).
+pub fn icon_data_url_for_path_index(path: &Path, index: i32) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+    unsafe {
+        let wide = to_wide(path);
+        let mut large: HICON = ptr::null_mut();
+        let count = windows_sys::Win32::UI::Shell::ExtractIconExW(
+            wide.as_ptr(),
+            index,
+            &mut large,
+            ptr::null_mut(),
+            1,
+        );
+        if count > 0 && !large.is_null() {
+            let url = hicon_to_png_data_url(large);
+            DestroyIcon(large);
+            if url.is_some() {
+                return url;
+            }
+        }
+    }
+    icon_data_url_for_path(path)
+}

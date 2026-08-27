@@ -10,6 +10,7 @@ mod model;
 mod process_lock;
 mod recycle_restore;
 mod scan;
+mod context_menu;
 mod startup;
 mod system_tools;
 
@@ -42,6 +43,9 @@ pub fn run() {
             commands::list_startup_items,
             commands::set_startup_enabled,
             commands::run_startup_smart_optimize,
+            commands::list_context_menu_items,
+            commands::set_context_menu_enabled,
+            commands::run_context_menu_smart_optimize,
             commands::run_smart_optimize,
             commands::cancel_smart_optimize,
             commands::get_hardware_info,

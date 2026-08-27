@@ -368,3 +368,12 @@ pub struct StartupOptimizeReport {
     pub skipped: Vec<crate::startup::StartupItem>,
     pub failed: Vec<StartupFailure>,
 }
+
+/// Context menu workspace one-click optimize.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextMenuOptimizeReport {
+    pub disabled: Vec<crate::context_menu::ContextMenuItem>,
+    pub skipped: Vec<crate::context_menu::ContextMenuItem>,
+    pub failed: Vec<StartupFailure>,
+}

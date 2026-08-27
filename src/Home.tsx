@@ -14,6 +14,7 @@ import {
   HardDrives,
   Lightning,
   Memory,
+  MouseRightClick,
   RocketLaunch,
   ShieldWarning,
   WarningCircle,
@@ -66,6 +67,12 @@ const HOME_TOOLS: {
     title: "开机项管理",
     desc: "管理自启程序，减轻开机负担",
     Icon: RocketLaunch,
+  },
+  {
+    id: "contextMenu",
+    title: "右键菜单管理",
+    desc: "精简资源管理器右键，减少第三方扩展",
+    Icon: MouseRightClick,
   },
   {
     id: "memory",

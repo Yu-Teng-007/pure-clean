@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AppTool, AppView, CleanBack } from "./appView";
+import ContextMenuWorkspace from "./ContextMenuWorkspace";
 import CleanToolsHub from "./CleanToolsHub";
 import CleanWorkspace from "./CleanWorkspace";
 import DevCacheWorkspace from "./DevCacheWorkspace";
@@ -71,6 +72,8 @@ export default function App() {
           />
         ) : view?.kind === "tool" && view.tool === "startup" ? (
           <StartupWorkspace onBack={goHome} />
+        ) : view?.kind === "tool" && view.tool === "contextMenu" ? (
+          <ContextMenuWorkspace onBack={goHome} />
         ) : view?.kind === "tool" && view.tool === "hardware" ? (
           <HardwareWorkspace onBack={goHome} />
         ) : view?.kind === "tool" && view.tool === "memory" ? (

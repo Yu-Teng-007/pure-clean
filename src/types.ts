@@ -302,6 +302,42 @@ export interface StartupOptimizeReport {
   failed: StartupFailure[];
 }
 
+export type ContextMenuHive = "hkcu" | "hklm";
+
+export type ContextMenuLocation =
+  | "file_shellex"
+  | "directory_shellex"
+  | "background_shellex"
+  | "drive_shellex"
+  | "allfs_shellex"
+  | "file_shell"
+  | "directory_shell"
+  | "background_shell";
+
+export type ContextMenuKind = "shellex" | "shell";
+
+export type ContextMenuImpact = "low" | "medium" | "high";
+
+export interface ContextMenuItem {
+  id: string;
+  name: string;
+  handler: string;
+  location: ContextMenuLocation;
+  hive: ContextMenuHive;
+  kind: ContextMenuKind;
+  enabled: boolean;
+  publisherHint: string | null;
+  impact: ContextMenuImpact;
+  suggestDisable: boolean;
+  iconDataUrl?: string | null;
+}
+
+export interface ContextMenuOptimizeReport {
+  disabled: ContextMenuItem[];
+  skipped: ContextMenuItem[];
+  failed: StartupFailure[];
+}
+
 export interface OptimizeReport {
   freedBytes: number;
   cleanSuccess: number;
