@@ -10,6 +10,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "release": "node scripts/release.mjs",
+    "release:setup": "node scripts/setup-github-release.mjs",
     "icons": "node scripts/generate-icon-png.mjs && tauri icon app-icon-1024.png && node scripts/copy-web-icons.mjs"
   },
   "dependencies": {

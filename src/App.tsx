@@ -116,7 +116,7 @@ export default function App() {
         if (!cfg.checkUpdatesOnStart) return;
         const msg = await invoke<string>("check_for_updates");
         if (msg.includes("发现新版本")) {
-          showToast(msg);
+          showToast(`${msg} · 可在设置中下载安装`);
         }
       } catch {
         /* updater not configured or network unavailable */

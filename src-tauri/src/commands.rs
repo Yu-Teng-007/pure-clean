@@ -660,6 +660,22 @@ pub async fn check_for_updates(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub async fn install_app_update(app: AppHandle) -> Result<String, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| format!("更新组件不可用: {e}"))?;
+    let Some(update) = updater.check().await.map_err(|e| format!("检查更新失败: {e}"))? else {
+        return Ok("当前已是最新版本".into());
+    };
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| format!("下载或安装更新失败: {e}"))?;
+    app.restart();
+    #[allow(unreachable_code)]
+    Ok("正在重启以完成更新…".into())
+}
+
+#[tauri::command]
 pub fn trigger_cleanup_reminder(app: AppHandle) -> Result<ScheduleReminderPayload, String> {
     scheduler::check_and_notify(&app, true)?;
     Ok(scheduler::estimate_cleanup())

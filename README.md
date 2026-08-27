@@ -20,6 +20,18 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+## 自动更新（GitHub Releases）
+
+完整步骤见 **[docs/github-releases-updater.md](./docs/github-releases-updater.md)**。
+
+简要流程：创建 GitHub 仓库 → 配置 Actions Secrets → **一键发布** → Publish Release → 应用内检查更新。
+
+```powershell
+npm run release:setup          # 首次
+npm run release -- patch -y --watch --publish
+# 或 .\scripts\release.ps1 patch -Yes -Watch -Publish
+```
+
 ## 清理入口
 
 - **智能优化**（首页主入口）：一键安全清理 + 按启发式建议禁用非必要开机项，并生成报告

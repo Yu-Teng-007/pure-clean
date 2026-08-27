@@ -49,6 +49,7 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
   );
   const [elevated, setElevated] = useState<boolean | null>(null);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [globInput, setGlobInput] = useState("");
   const [explorerMenu, setExplorerMenu] = useState<boolean | null>(null);
   const [winsxsHint, setWinsxsHint] = useState<WinSxSHint | null>(null);
@@ -187,8 +188,23 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
 
   const checkUpdates = async () => {
     setUpdateStatus("检查中…");
+    setUpdateAvailable(false);
     try {
       const msg = await invoke<string>("check_for_updates");
+      setUpdateStatus(msg);
+      setUpdateAvailable(msg.includes("发现新版本"));
+      showToast(msg);
+    } catch (e) {
+      const err = String(e);
+      setUpdateStatus(err);
+      showToast(err);
+    }
+  };
+
+  const installUpdate = async () => {
+    setUpdateStatus("正在下载并安装…");
+    try {
+      const msg = await invoke<string>("install_app_update");
       setUpdateStatus(msg);
       showToast(msg);
     } catch (e) {
@@ -532,7 +548,7 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
               <span>
                 <span className="font-medium">启动时检查更新</span>
                 <span className="mt-0.5 block text-[11.5px] text-[var(--color-ink)]/45">
-                  需在发布时配置更新服务器后生效
+                  从 GitHub Releases 拉取 latest.json 检查新版本
                 </span>
               </span>
             </label>
@@ -545,6 +561,15 @@ export default function SettingsWorkspace({ onBack }: SettingsWorkspaceProps) {
                 <ArrowsClockwise size={14} weight="bold" />
                 立即检查更新
               </button>
+              {updateAvailable && (
+                <button
+                  type="button"
+                  onClick={() => void installUpdate()}
+                  className="btn-press inline-flex items-center gap-1.5 rounded-xl bg-[var(--color-sea)] px-3 py-2 text-[12px] font-semibold text-white hover:bg-[var(--color-sea-bright)]"
+                >
+                  下载并安装
+                </button>
+              )}
               {updateStatus && (
                 <span className="text-[11.5px] text-[var(--color-ink)]/55">
                   {updateStatus}

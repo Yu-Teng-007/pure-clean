@@ -82,6 +82,7 @@ pub fn run() {
             commands::is_elevated,
             commands::restart_as_admin,
             commands::check_for_updates,
+            commands::install_app_update,
             commands::trigger_cleanup_reminder,
             commands::export_history,
             commands::export_config,
