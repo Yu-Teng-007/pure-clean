@@ -13,6 +13,7 @@ use crate::model::{
     AnalyzeResult, BlockingProcess, Category, CleanReport, CleanRequest, CleanTarget,
     DevCacheDashboard, DriveInfo, HistoryCleanedItem, HistoryEntry, OptimizePhase, OptimizeProgress,
     OptimizeReport, RestoreReport, ScanRequest, ScanResult, ScanRoot, StartupFailure,
+    StartupOptimizeReport,
 };
 use crate::process_lock;
 use crate::recycle_restore;
@@ -351,6 +352,20 @@ pub fn trim_process_working_set(pid: u32) -> Result<u64, String> {
 #[tauri::command]
 pub fn set_startup_enabled(id: String, enabled: bool) -> Result<StartupItem, String> {
     startup::set_startup_enabled(&id, enabled)
+}
+
+#[tauri::command]
+pub fn run_startup_smart_optimize() -> Result<StartupOptimizeReport, String> {
+    let (disabled, skipped, failed_pairs) = startup::disable_suggested();
+    let failed: Vec<StartupFailure> = failed_pairs
+        .into_iter()
+        .map(|(name, error)| StartupFailure { name, error })
+        .collect();
+    Ok(StartupOptimizeReport {
+        disabled,
+        skipped,
+        failed,
+    })
 }
 
 fn emit_optimize(app: &AppHandle, phase: OptimizePhase, message: &str) {

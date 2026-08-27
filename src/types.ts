@@ -296,6 +296,12 @@ export interface StartupFailure {
   error: string;
 }
 
+export interface StartupOptimizeReport {
+  disabled: StartupItem[];
+  skipped: StartupItem[];
+  failed: StartupFailure[];
+}
+
 export interface OptimizeReport {
   freedBytes: number;
   cleanSuccess: number;

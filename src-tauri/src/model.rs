@@ -359,3 +359,12 @@ pub struct OptimizeReport {
     pub dry_run: bool,
     pub to_recycle_bin: bool,
 }
+
+/// Startup workspace one-click optimize (disable heuristic suggestions only).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupOptimizeReport {
+    pub disabled: Vec<crate::startup::StartupItem>,
+    pub skipped: Vec<crate::startup::StartupItem>,
+    pub failed: Vec<StartupFailure>,
+}
